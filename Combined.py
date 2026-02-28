@@ -662,42 +662,60 @@ def pre_emphasis(audio, coef=PRE_EMP):
     return np.append(audio[0], audio[1:] - coef * audio[:-1])
 def mic_bytes_to_audio_array(audio_dict: dict, target_sr: int = SR) -> np.ndarray:
     """
-    Convert raw PCM bytes from streamlit-mic-recorder 0.0.8 to a
-    normalised float32 numpy array at target_sr.
-
-    audio_dict keys: bytes, sample_rate, sample_width, num_channels
+    Robustly decode raw bytes from streamlit-mic-recorder 0.0.8 into
+    a normalised float32 mono numpy array at target_sr.
     """
-    import wave, io, struct
+    import io, wave
 
-    raw        = audio_dict["bytes"]
-    src_sr     = int(audio_dict.get("sample_rate",  44100))
-    sw         = int(audio_dict.get("sample_width",     2))   # bytes per sample
-    n_ch       = int(audio_dict.get("num_channels",     1))
+    raw      = audio_dict.get("bytes", b"")
+    src_sr   = int(audio_dict.get("sample_rate",  44100))
+    sw       = int(audio_dict.get("sample_width",     2))   # bytes/sample (2 = int16)
+    n_ch     = int(audio_dict.get("num_channels",     1))
 
-    # ── Wrap raw PCM in a WAV container so any reader can handle it ──────────
-    wav_buf = io.BytesIO()
-    with wave.open(wav_buf, "wb") as wf:
-        wf.setnchannels(n_ch)
-        wf.setsampwidth(sw)
-        wf.setframerate(src_sr)
-        wf.writeframes(raw)
-    wav_buf.seek(0)
+    audio_arr = None
 
-    # ── Decode to float32 numpy array ────────────────────────────────────────
-    import soundfile as sf
-    audio_arr, _ = sf.read(wav_buf, dtype="float32", always_2d=False)
+    # ── Strategy 1: maybe it's already a valid audio container (OGG/WAV) ────
+    try:
+        import soundfile as sf
+        audio_arr, src_sr = sf.read(io.BytesIO(raw), dtype="float32", always_2d=False)
+    except Exception:
+        pass
 
-    # ── Mix down to mono if stereo ───────────────────────────────────────────
+    # ── Strategy 2: wrap as WAV and read ────────────────────────────────────
+    if audio_arr is None:
+        try:
+            import soundfile as sf
+            wav_buf = io.BytesIO()
+            with wave.open(wav_buf, "wb") as wf:
+                wf.setnchannels(n_ch)
+                wf.setsampwidth(sw)
+                wf.setframerate(src_sr)
+                wf.writeframes(raw)
+            wav_buf.seek(0)
+            audio_arr, src_sr = sf.read(wav_buf, dtype="float32", always_2d=False)
+        except Exception:
+            pass
+
+    # ── Strategy 3: raw int16 numpy decode ──────────────────────────────────
+    if audio_arr is None:
+        try:
+            pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            if n_ch > 1:
+                pcm = pcm.reshape(-1, n_ch).mean(axis=1)
+            audio_arr = pcm
+        except Exception:
+            audio_arr = np.zeros(sr, dtype=np.float32)  # 1s silence fallback
+
+    # ── Mix to mono ──────────────────────────────────────────────────────────
     if audio_arr.ndim > 1:
         audio_arr = audio_arr.mean(axis=1)
 
-    # ── Resample to target SR if needed ─────────────────────────────────────
-    if src_sr != target_sr:
+    # ── Resample ─────────────────────────────────────────────────────────────
+    if src_sr != target_sr and src_sr > 0:
         from scipy import signal as _sig
-        audio_arr = _sig.resample(
-            audio_arr,
-            int(len(audio_arr) * target_sr / src_sr)
-        ).astype(np.float32)
+        n_out = int(len(audio_arr) * target_sr / src_sr)
+        if n_out > 0:
+            audio_arr = _sig.resample(audio_arr, n_out)
 
     return audio_arr.astype(np.float32)
 def normalize_audio(audio):
@@ -1779,9 +1797,39 @@ with tab1:
                 _m1_cur_id = _m1_audio.get("id", 0)
                 if _m1_cur_id != st.session_state.get("_m1_last_mic_id", -1):
                     st.session_state["_m1_last_mic_id"] = _m1_cur_id
+
+                    # ── Debug: show what the recorder returned ──────────────
+                    with st.expander("🔍 Audio debug info", expanded=False):
+                        _raw_bytes = _m1_audio.get("bytes", b"")
+                        st.json({
+                            "bytes_length":   len(_raw_bytes),
+                            "sample_rate":    _m1_audio.get("sample_rate"),
+                            "sample_width":   _m1_audio.get("sample_width"),
+                            "num_channels":   _m1_audio.get("num_channels"),
+                            "id":             _m1_audio.get("id"),
+                            "first_16_bytes": list(_raw_bytes[:16]) if _raw_bytes else [],
+                        })
+                        # Show raw audio player so you can hear what was captured
+                        st.audio(_raw_bytes)
+
                     with st.spinner("Analyzing transmission..."):
                         try:
                             _audio_arr = mic_bytes_to_audio_array(_m1_audio, target_sr=SR)
+
+                            # Sanity check — warn if signal looks silent
+                            _rms = float(np.sqrt(np.mean(_audio_arr ** 2)))
+                            _dur = len(_audio_arr) / SR
+                            st.caption(f"Decoded: {_dur:.1f}s · RMS {_rms:.4f} · "
+                                       f"peak {float(np.max(np.abs(_audio_arr))):.4f} · "
+                                       f"SR {SR}Hz")
+
+                            if _rms < 0.001:
+                                st.warning(
+                                    "⚠️ Signal is near-silent (RMS < 0.001). "
+                                    "Check browser mic permissions and speak closer to mic. "
+                                    "Expand 'Audio debug info' above and press play to verify capture."
+                                )
+
                             ab    = _audio_arr.astype(np.float32).tobytes()
                             feats = extract_all_features(ab, SR)
                             ind   = compute_indicators(feats, m1_role)
@@ -1798,6 +1846,13 @@ with tab1:
                             st.rerun()
                         except Exception as _e:
                             st.error(f"Analysis error: {_e}")
+                            import traceback
+                            st.code(traceback.format_exc())
+
+
+
+
+
     with col_up1:
         uploaded1=st.file_uploader("Upload Audio",type=['wav','mp3','ogg','flac'],label_visibility='collapsed',key="m1_upload")
         if uploaded1:
