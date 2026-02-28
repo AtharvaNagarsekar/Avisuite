@@ -5,7 +5,6 @@ ffmpeg
 torch 
 torchaudio
 faster-whisper 
-st-audiorec
 streamlit-webrtc
 librosa
 numpy
