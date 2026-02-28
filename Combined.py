@@ -225,7 +225,7 @@ PRE_EMP  = 0.97
 MISTRAL_API_KEY = st.secrets["MISTRAL_API_KEY"]
 MISTRAL_API_URL = st.secrets["MISTRAL_API_URL"]
 MISTRAL_MODEL   = st.secrets["MISTRAL_MODEL"]
-LIVEATC_URL     = st.secrets["LIVEATC_URL"]
+LIVEATC_URL     = "https://d.liveatc.net/kaus3_app_dep"
 
 RISK_COLORS = {"NOMINAL":"#2dcc8f","MONITOR":"#f0a030","CAUTION":"#e85020","ALERT":"#e84040"}
 
