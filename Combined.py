@@ -4,6 +4,7 @@ from scipy import signal
 from scipy.fft import rfft, rfftfreq
 from scipy.signal import lfilter, find_peaks
 from scipy.ndimage import uniform_filter1d
+from streamlit_mic_recorder import mic_recorder
 import soundfile as sf
 import tempfile, os, time, warnings, json, re, random, subprocess, shutil
 import pandas as pd
