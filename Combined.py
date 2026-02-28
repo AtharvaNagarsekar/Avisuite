@@ -1776,7 +1776,7 @@ with tab1:
         try:
             from streamlit_mic_recorder import mic_recorder as _m1_mic
             _mic_ok = True
-        except ImportError:a
+        except ImportError:
             _mic_ok = False
 
         if not _mic_ok:
