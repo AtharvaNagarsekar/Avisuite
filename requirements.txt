@@ -16,3 +16,6 @@ sounddevice
 pandas
 plotly
 requests
+fastapi
+uvicorn
+httpx
