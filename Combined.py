@@ -660,7 +660,46 @@ init_state()
 # ══════════════════════════════════════════════════════════════════════════════
 def pre_emphasis(audio, coef=PRE_EMP):
     return np.append(audio[0], audio[1:] - coef * audio[:-1])
+def mic_bytes_to_audio_array(audio_dict: dict, target_sr: int = SR) -> np.ndarray:
+    """
+    Convert raw PCM bytes from streamlit-mic-recorder 0.0.8 to a
+    normalised float32 numpy array at target_sr.
 
+    audio_dict keys: bytes, sample_rate, sample_width, num_channels
+    """
+    import wave, io, struct
+
+    raw        = audio_dict["bytes"]
+    src_sr     = int(audio_dict.get("sample_rate",  44100))
+    sw         = int(audio_dict.get("sample_width",     2))   # bytes per sample
+    n_ch       = int(audio_dict.get("num_channels",     1))
+
+    # ── Wrap raw PCM in a WAV container so any reader can handle it ──────────
+    wav_buf = io.BytesIO()
+    with wave.open(wav_buf, "wb") as wf:
+        wf.setnchannels(n_ch)
+        wf.setsampwidth(sw)
+        wf.setframerate(src_sr)
+        wf.writeframes(raw)
+    wav_buf.seek(0)
+
+    # ── Decode to float32 numpy array ────────────────────────────────────────
+    import soundfile as sf
+    audio_arr, _ = sf.read(wav_buf, dtype="float32", always_2d=False)
+
+    # ── Mix down to mono if stereo ───────────────────────────────────────────
+    if audio_arr.ndim > 1:
+        audio_arr = audio_arr.mean(axis=1)
+
+    # ── Resample to target SR if needed ─────────────────────────────────────
+    if src_sr != target_sr:
+        from scipy import signal as _sig
+        audio_arr = _sig.resample(
+            audio_arr,
+            int(len(audio_arr) * target_sr / src_sr)
+        ).astype(np.float32)
+
+    return audio_arr.astype(np.float32)
 def normalize_audio(audio):
     peak = np.max(np.abs(audio))
     return audio / (peak + 1e-9)
@@ -1291,9 +1330,6 @@ def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice
     unsafe_allow_html=True)
     st.caption("Start → speak → Stop  ·  Whisper STT + Mistral aviation correction")
 
-    # v0.0.8 API: mic_recorder(start_prompt, stop_prompt, just_once=False,
-    #                           use_container_width=False, key=None)
-    # Returns dict with keys: bytes, id, sample_rate, sample_width, num_channels
     audio = mic_recorder(
         start_prompt="● Start Recording",
         stop_prompt="■ Stop & Transcribe",
@@ -1307,9 +1343,23 @@ def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice
             st.session_state[submit_key] = False
 
             with st.spinner("Transcribing with Whisper..."):
-                import tempfile, os
+                import tempfile, os, wave, io
+
+                # Convert raw PCM → proper WAV file for Whisper
+                audio_arr = mic_bytes_to_audio_array(audio, target_sr=16000)
+                wav_buf   = io.BytesIO()
+                with wave.open(wav_buf, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)        # 16-bit
+                    wf.setframerate(16000)
+                    # float32 → int16
+                    import struct
+                    pcm16 = (audio_arr * 32767).clip(-32768, 32767).astype(np.int16)
+                    wf.writeframes(pcm16.tobytes())
+                wav_buf.seek(0)
+
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-                    f.write(audio["bytes"])
+                    f.write(wav_buf.read())
                     audio_path = f.name
                 try:
                     whisper_raw = transcribe_audio(audio_path)
@@ -1329,6 +1379,7 @@ def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice
 
             if whisper_raw.lower().strip() != corrected.lower().strip():
                 st.caption(f"Whisper heard: \"{whisper_raw}\"")
+
         else:
             stored = st.session_state.get(state_key, "")
             if stored:
@@ -1343,7 +1394,8 @@ def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice
             st.session_state[submit_key] = True
 
     st.markdown('</div>', unsafe_allow_html=True)
-    return stored_transcript# ══════════════════════════════════════════════════════════════════════════════
+    return stored_transcript
+
 #  MODULE 3 — RL ENGINE
 # ══════════════════════════════════════════════════════════════════════════════
 RL_ALPHA,RL_GAMMA,RL_EPSILON=0.3,0.7,0.2
@@ -1717,7 +1769,6 @@ with tab1:
             margin-bottom:6px">🎙 Record · Start → Speak → Stop</div>""",
             unsafe_allow_html=True)
 
-            # v0.0.8: mic_recorder(start_prompt, stop_prompt, key)
             _m1_audio = _m1_mic(
                 start_prompt="● Start Recording",
                 stop_prompt="■ Stop & Analyze",
@@ -1730,19 +1781,8 @@ with tab1:
                     st.session_state["_m1_last_mic_id"] = _m1_cur_id
                     with st.spinner("Analyzing transmission..."):
                         try:
-                            import io, soundfile as _sf_m1
-                            _audio_arr, _fsr = _sf_m1.read(
-                                io.BytesIO(_m1_audio["bytes"]),
-                                dtype='float32', always_2d=False
-                            )
-                            if _audio_arr.ndim > 1:
-                                _audio_arr = _audio_arr.mean(axis=1)
-                            if _fsr != SR:
-                                from scipy import signal as _sig
-                                _audio_arr = _sig.resample(
-                                    _audio_arr, int(len(_audio_arr) * SR / _fsr)
-                                )
-                            ab = _audio_arr.astype(np.float32).tobytes()
+                            _audio_arr = mic_bytes_to_audio_array(_m1_audio, target_sr=SR)
+                            ab    = _audio_arr.astype(np.float32).tobytes()
                             feats = extract_all_features(ab, SR)
                             ind   = compute_indicators(feats, m1_role)
                             st.session_state.m1_results  = ind
