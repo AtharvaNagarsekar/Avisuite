@@ -1336,7 +1336,7 @@ def transcribe_audio(audio_path: str) -> str:
             converted = audio_path
     except Exception:
         converted = audio_path
-    model = whisper_lib.load_model("large")
+    model = whisper_lib.load_model("medium")
     result = model.transcribe(
         converted, fp16=False, language="en",
         condition_on_previous_text=False, word_timestamps=True,
