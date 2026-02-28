@@ -1,0 +1,17 @@
+streamlit-mic-recorder 
+streamlit
+openai-whisper 
+torch 
+torchaudio
+faster-whisper 
+streamlit-webrtc
+librosa
+numpy
+soundfile
+whisper
+scipy
+streamlit-audiorecorder
+sounddevice
+pandas
+plotly
+requests
