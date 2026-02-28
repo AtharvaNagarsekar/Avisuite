@@ -1275,7 +1275,6 @@ Return ONLY the corrected readback text — no labels, no explanations.
         return r.json()["choices"][0]["message"]["content"].strip()
     except Exception:
         return raw_transcript
-
 def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice Readback"):
     id_key     = f"{state_key}_last_id"
     submit_key = f"{state_key}_submit_now"
@@ -1283,37 +1282,51 @@ def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice
     try:
         from streamlit_mic_recorder import mic_recorder
     except ImportError:
-        st.warning("Install streamlit-mic-recorder: `pip install streamlit-mic-recorder`")
+        st.warning("Install streamlit-mic-recorder==0.0.8 in requirements.txt")
         return st.session_state.get(state_key, "")
 
     st.markdown(f'<div class="whisper-panel">', unsafe_allow_html=True)
     st.markdown(f"""<div style="font-family:var(--font-mono);font-size:0.62rem;letter-spacing:0.18em;
     text-transform:uppercase;color:var(--accent-green);margin-bottom:10px">{label}</div>""",
     unsafe_allow_html=True)
-    st.caption("Start → speak → Stop  ·  Whisper STT + Mistral aviation correction applied automatically")
+    st.caption("Start → speak → Stop  ·  Whisper STT + Mistral aviation correction")
 
+    # v0.0.8 API: mic_recorder(start_prompt, stop_prompt, just_once=False,
+    #                           use_container_width=False, key=None)
+    # Returns dict with keys: bytes, id, sample_rate, sample_width, num_channels
     audio = mic_recorder(
         start_prompt="● Start Recording",
         stop_prompt="■ Stop & Transcribe",
         key=widget_key
     )
 
-    if audio:
+    if audio and isinstance(audio, dict) and audio.get("bytes"):
         current_id = audio.get("id", 0)
         if current_id != st.session_state.get(id_key, -1):
             st.session_state[id_key] = current_id
             st.session_state[submit_key] = False
+
             with st.spinner("Transcribing with Whisper..."):
+                import tempfile, os
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
                     f.write(audio["bytes"])
                     audio_path = f.name
-                whisper_raw = transcribe_audio(audio_path)
+                try:
+                    whisper_raw = transcribe_audio(audio_path)
+                finally:
+                    try:
+                        os.unlink(audio_path)
+                    except Exception:
+                        pass
+
             with st.spinner("Applying aviation correction..."):
                 corrected = mistral_aviation_correct(whisper_raw)
                 st.session_state[state_key] = corrected
+
             st.markdown(f"""<div style="background:rgba(45,204,143,0.06);border:1px solid rgba(45,204,143,0.2);
             border-radius:4px;padding:10px 14px;margin:6px 0;font-family:var(--font-mono);font-size:0.8rem;color:#a0d8b8">
             ✓ <strong>Corrected:</strong> {corrected}</div>""", unsafe_allow_html=True)
+
             if whisper_raw.lower().strip() != corrected.lower().strip():
                 st.caption(f"Whisper heard: \"{whisper_raw}\"")
         else:
@@ -1330,10 +1343,7 @@ def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice
             st.session_state[submit_key] = True
 
     st.markdown('</div>', unsafe_allow_html=True)
-    return stored_transcript
-
-
-# ══════════════════════════════════════════════════════════════════════════════
+    return stored_transcript# ══════════════════════════════════════════════════════════════════════════════
 #  MODULE 3 — RL ENGINE
 # ══════════════════════════════════════════════════════════════════════════════
 RL_ALPHA,RL_GAMMA,RL_EPSILON=0.3,0.7,0.2
@@ -1694,52 +1704,60 @@ with tab1:
     col_rec1, col_up1, col_conf1 = st.columns([2,1,1])
     with col_rec1:
         try:
-            from streamlit_mic_recorder import mic_recorder as _mic_rec_m1
-            _mic_available = True
+            from streamlit_mic_recorder import mic_recorder as _m1_mic
+            _mic_ok = True
         except ImportError:
-            _mic_available = False
+            _mic_ok = False
 
-        if _mic_available:
-            st.markdown("""<div style="font-family:var(--font-mono);font-size:0.62rem;letter-spacing:0.18em;
-            text-transform:uppercase;color:var(--accent-blue);margin-bottom:8px">
-            🎙 Record Transmission · Start → Speak → Stop</div>""", unsafe_allow_html=True)
-            st.caption("Uses browser microphone — works on Streamlit Cloud")
+        if not _mic_ok:
+            st.error("Add `streamlit-mic-recorder==0.0.8` to requirements.txt")
+        else:
+            st.markdown("""<div style="font-family:var(--font-mono);font-size:0.62rem;
+            letter-spacing:0.18em;text-transform:uppercase;color:var(--accent-blue);
+            margin-bottom:6px">🎙 Record · Start → Speak → Stop</div>""",
+            unsafe_allow_html=True)
 
-            _m1_audio = _mic_rec_m1(
+            # v0.0.8: mic_recorder(start_prompt, stop_prompt, key)
+            _m1_audio = _m1_mic(
                 start_prompt="● Start Recording",
                 stop_prompt="■ Stop & Analyze",
                 key="m1_mic_recorder"
             )
-            if _m1_audio:
-                _current_id = _m1_audio.get("id", 0)
-                if _current_id != st.session_state.get("_m1_last_mic_id", -1):
-                    st.session_state["_m1_last_mic_id"] = _current_id
+
+            if _m1_audio and isinstance(_m1_audio, dict) and _m1_audio.get("bytes"):
+                _m1_cur_id = _m1_audio.get("id", 0)
+                if _m1_cur_id != st.session_state.get("_m1_last_mic_id", -1):
+                    st.session_state["_m1_last_mic_id"] = _m1_cur_id
                     with st.spinner("Analyzing transmission..."):
                         try:
-                            import io
-                            import soundfile as _sf_m1
-                            _raw = _m1_audio["bytes"]
-                            _audio_arr, _fsr = _sf_m1.read(io.BytesIO(_raw), dtype='float32', always_2d=False)
+                            import io, soundfile as _sf_m1
+                            _audio_arr, _fsr = _sf_m1.read(
+                                io.BytesIO(_m1_audio["bytes"]),
+                                dtype='float32', always_2d=False
+                            )
                             if _audio_arr.ndim > 1:
                                 _audio_arr = _audio_arr.mean(axis=1)
                             if _fsr != SR:
                                 from scipy import signal as _sig
-                                _audio_arr = _sig.resample(_audio_arr, int(len(_audio_arr) * SR / _fsr))
+                                _audio_arr = _sig.resample(
+                                    _audio_arr, int(len(_audio_arr) * SR / _fsr)
+                                )
                             ab = _audio_arr.astype(np.float32).tobytes()
                             feats = extract_all_features(ab, SR)
-                            ind = compute_indicators(feats, m1_role)
-                            st.session_state.m1_results = ind
+                            ind   = compute_indicators(feats, m1_role)
+                            st.session_state.m1_results  = ind
                             st.session_state.m1_features = feats
                             st.session_state.m1_history.append({
-                                'time': time.strftime("%H:%M:%S"), 'role': m1_role,
-                                **{k: ind[k] for k in ['fatigue','stress','cognitive','rt_clarity','composite','risk_level','confidence']}
+                                'time': time.strftime("%H:%M:%S"),
+                                'role': m1_role,
+                                **{k: ind[k] for k in [
+                                    'fatigue', 'stress', 'cognitive', 'rt_clarity',
+                                    'composite', 'risk_level', 'confidence'
+                                ]}
                             })
                             st.rerun()
-                        except Exception as e:
-                            st.error(f"Analysis error: {e}")
-        else:
-            st.warning("Install streamlit-mic-recorder: `pip install streamlit-mic-recorder`")
-
+                        except Exception as _e:
+                            st.error(f"Analysis error: {_e}")
     with col_up1:
         uploaded1=st.file_uploader("Upload Audio",type=['wav','mp3','ogg','flac'],label_visibility='collapsed',key="m1_upload")
         if uploaded1:
