@@ -1,6 +1,7 @@
 streamlit-mic-recorder 
 streamlit
 openai-whisper 
+ffmpeg
 torch 
 torchaudio
 faster-whisper 
