@@ -1776,7 +1776,7 @@ with tab1:
         try:
             from streamlit_mic_recorder import mic_recorder as _m1_mic
             _mic_ok = True
-        except ImportError:
+        except ImportError:a
             _mic_ok = False
 
         if not _mic_ok:
@@ -1798,56 +1798,101 @@ with tab1:
                 if _m1_cur_id != st.session_state.get("_m1_last_mic_id", -1):
                     st.session_state["_m1_last_mic_id"] = _m1_cur_id
 
-                    # ── Debug: show what the recorder returned ──────────────
-                    with st.expander("🔍 Audio debug info", expanded=False):
-                        _raw_bytes = _m1_audio.get("bytes", b"")
-                        st.json({
-                            "bytes_length":   len(_raw_bytes),
-                            "sample_rate":    _m1_audio.get("sample_rate"),
-                            "sample_width":   _m1_audio.get("sample_width"),
-                            "num_channels":   _m1_audio.get("num_channels"),
-                            "id":             _m1_audio.get("id"),
-                            "first_16_bytes": list(_raw_bytes[:16]) if _raw_bytes else [],
+                    _raw_bytes = _m1_audio.get("bytes", b"")
+
+                    # ── Save debug info to session state BEFORE any rerun ───
+                    st.session_state["_m1_debug"] = {
+                        "bytes_length":   len(_raw_bytes),
+                        "sample_rate":    _m1_audio.get("sample_rate"),
+                        "sample_width":   _m1_audio.get("sample_width"),
+                        "num_channels":   _m1_audio.get("num_channels"),
+                        "id":             _m1_audio.get("id"),
+                        "first_16_bytes": list(_raw_bytes[:16]) if _raw_bytes else [],
+                        "raw_bytes":      _raw_bytes,   # kept for audio player
+                    }
+
+                    try:
+                        _audio_arr = mic_bytes_to_audio_array(_m1_audio, target_sr=SR)
+                        _rms = float(np.sqrt(np.mean(_audio_arr ** 2)))
+                        _dur = len(_audio_arr) / SR
+
+                        # save decode stats too
+                        st.session_state["_m1_debug"]["decoded_duration_s"] = round(_dur, 2)
+                        st.session_state["_m1_debug"]["decoded_rms"]        = round(_rms, 6)
+                        st.session_state["_m1_debug"]["decoded_peak"]       = round(
+                            float(np.max(np.abs(_audio_arr))), 6)
+
+                        ab    = _audio_arr.astype(np.float32).tobytes()
+                        feats = extract_all_features(ab, SR)
+                        ind   = compute_indicators(feats, m1_role)
+                        st.session_state.m1_results  = ind
+                        st.session_state.m1_features = feats
+                        st.session_state.m1_history.append({
+                            'time': time.strftime("%H:%M:%S"),
+                            'role': m1_role,
+                            **{k: ind[k] for k in [
+                                'fatigue', 'stress', 'cognitive', 'rt_clarity',
+                                'composite', 'risk_level', 'confidence'
+                            ]}
                         })
-                        # Show raw audio player so you can hear what was captured
-                        st.audio(_raw_bytes)
+                    except Exception as _e:
+                        import traceback
+                        st.session_state["_m1_debug"]["error"] = traceback.format_exc()
 
-                    with st.spinner("Analyzing transmission..."):
-                        try:
-                            _audio_arr = mic_bytes_to_audio_array(_m1_audio, target_sr=SR)
+                    st.rerun()
 
-                            # Sanity check — warn if signal looks silent
-                            _rms = float(np.sqrt(np.mean(_audio_arr ** 2)))
-                            _dur = len(_audio_arr) / SR
-                            st.caption(f"Decoded: {_dur:.1f}s · RMS {_rms:.4f} · "
-                                       f"peak {float(np.max(np.abs(_audio_arr))):.4f} · "
-                                       f"SR {SR}Hz")
+            # ── Always render debug panel (survives rerun via session_state) ─
+            _dbg = st.session_state.get("_m1_debug")
+            if _dbg:
+                with st.expander("🔍 Last recording — debug info", expanded=True):
+                    # Audio player — lets you hear what was actually captured
+                    _rb = _dbg.get("raw_bytes")
+                    if _rb:
+                        st.caption("▶ Play back what was recorded:")
+                        st.audio(_rb)
 
-                            if _rms < 0.001:
-                                st.warning(
-                                    "⚠️ Signal is near-silent (RMS < 0.001). "
-                                    "Check browser mic permissions and speak closer to mic. "
-                                    "Expand 'Audio debug info' above and press play to verify capture."
-                                )
+                    # Stats table
+                    import pandas as _pd_dbg
+                    _rows = {k: v for k, v in _dbg.items() if k != "raw_bytes"}
+                    st.dataframe(
+                        _pd_dbg.DataFrame(
+                            list(_rows.items()),
+                            columns=["field", "value"]
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
-                            ab    = _audio_arr.astype(np.float32).tobytes()
-                            feats = extract_all_features(ab, SR)
-                            ind   = compute_indicators(feats, m1_role)
-                            st.session_state.m1_results  = ind
-                            st.session_state.m1_features = feats
-                            st.session_state.m1_history.append({
-                                'time': time.strftime("%H:%M:%S"),
-                                'role': m1_role,
-                                **{k: ind[k] for k in [
-                                    'fatigue', 'stress', 'cognitive', 'rt_clarity',
-                                    'composite', 'risk_level', 'confidence'
-                                ]}
-                            })
-                            st.rerun()
-                        except Exception as _e:
-                            st.error(f"Analysis error: {_e}")
-                            import traceback
-                            st.code(traceback.format_exc())
+                    # Warnings
+                    _rms_v = _dbg.get("decoded_rms", 0)
+                    _dur_v = _dbg.get("decoded_duration_s", 0)
+                    _blen  = _dbg.get("bytes_length", 0)
+                    _fb16  = _dbg.get("first_16_bytes", [])
+
+                    if _blen < 1000:
+                        st.error(f"❌ bytes_length={_blen} is tiny — browser likely not capturing audio. "
+                                 "Check mic permissions (padlock icon in browser address bar).")
+                    elif _rms_v < 0.001:
+                        st.warning("⚠️ RMS < 0.001 — audio captured but signal is near-silent. "
+                                   "Press Play above to confirm. Possible wrong PCM decoding.")
+                        if _fb16[:4] == [82, 73, 70, 70]:
+                            st.info("ℹ️ First bytes = RIFF — this IS a WAV file already. "
+                                    "soundfile Strategy 1 should have worked.")
+                        elif _fb16[:4] == [79, 103, 103, 83]:
+                            st.info("ℹ️ First bytes = OggS — browser sent OGG format.")
+                        else:
+                            st.info(f"ℹ️ First bytes = {_fb16[:4]} — raw PCM (no container).")
+                    else:
+                        st.success(f"✅ Audio looks good — {_dur_v}s, RMS {_rms_v:.4f}")
+
+                    if _dbg.get("error"):
+                        st.error("Analysis error:")
+                        st.code(_dbg["error"])
+
+                    if st.button("Clear debug", key="m1_clear_debug"):
+                        del st.session_state["_m1_debug"]
+                        st.rerun()
+
 
 
 
