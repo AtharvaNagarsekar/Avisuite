@@ -654,7 +654,54 @@ def init_state():
 
 init_state()
 
+def audio_input_to_array(uploaded_audio, target_sr: int = SR) -> np.ndarray:
+    """
+    Decode audio from st.audio_input (returns OGG/Opus or WAV bytes)
+    into a normalised float32 mono numpy array at target_sr.
+    Uses ffmpeg subprocess — works on Streamlit Cloud and locally.
+    """
+    import io, tempfile, os, subprocess, soundfile as sf
 
+    raw = uploaded_audio.read() if hasattr(uploaded_audio, "read") else uploaded_audio
+
+    # Write raw bytes to a temp file (unknown format — let ffmpeg detect it)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".audio") as f_in:
+        f_in.write(raw)
+        in_path = f_in.name
+
+    out_path = in_path + "_converted.wav"
+
+    try:
+        # ffmpeg: decode whatever format → 16-bit PCM WAV mono at target_sr
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", in_path,
+                "-acodec", "pcm_s16le",
+                "-ar", str(target_sr),
+                "-ac", "1",
+                out_path,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
+
+        if result.returncode != 0 or not os.path.exists(out_path):
+            raise RuntimeError(f"ffmpeg conversion failed (code {result.returncode})")
+
+        audio_arr, _ = sf.read(out_path, dtype="float32", always_2d=False)
+
+    finally:
+        try: os.unlink(in_path)
+        except Exception: pass
+        try: os.unlink(out_path)
+        except Exception: pass
+
+    if audio_arr.ndim > 1:
+        audio_arr = audio_arr.mean(axis=1)
+
+    return audio_arr.astype(np.float32)
 # ══════════════════════════════════════════════════════════════════════════════
 #  MODULE 1 — DSP CORE  (unchanged logic)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1327,11 +1374,11 @@ Return ONLY the corrected readback text — no labels, no explanations.
 def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice Readback"):
     submit_key = f"{state_key}_submit_now"
 
-    st.markdown(f'<div class="whisper-panel">', unsafe_allow_html=True)
-    st.markdown(f"""<div style="font-family:var(--font-mono);font-size:0.62rem;letter-spacing:0.18em;
-    text-transform:uppercase;color:var(--accent-green);margin-bottom:8px">{label}</div>""",
-    unsafe_allow_html=True)
-    st.caption("Click mic → speak readback → click stop  ·  Whisper STT + Mistral correction")
+    st.markdown('<div class="whisper-panel">', unsafe_allow_html=True)
+    st.markdown(f"""<div style="font-family:var(--font-mono);font-size:0.62rem;
+    letter-spacing:0.18em;text-transform:uppercase;color:var(--accent-green);
+    margin-bottom:8px">{label}</div>""", unsafe_allow_html=True)
+    st.caption("Click mic → speak → click stop  ·  Whisper STT + Mistral correction")
 
     _audio_input = st.audio_input(
         "Record readback",
@@ -1340,80 +1387,69 @@ def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice
     )
 
     if _audio_input is not None:
-        _cur_id = id(_audio_input)
-        if _cur_id != st.session_state.get(f"_{widget_key}_last_id", -1):
-            st.session_state[f"_{widget_key}_last_id"] = _cur_id
+        _raw = _audio_input.read()
+        _cur_hash = hash(_raw[:1024])
+
+        if _cur_hash != st.session_state.get(f"_{widget_key}_last_hash", None):
+            st.session_state[f"_{widget_key}_last_hash"] = _cur_hash
             st.session_state[submit_key] = False
 
             with st.spinner("Transcribing with Whisper..."):
-                import io, tempfile, os, wave
-                _raw = _audio_input.read()
+                import tempfile, os, subprocess, wave
 
-                # Write to temp WAV for Whisper (needs file path)
+                # Step 1: ffmpeg → 16kHz mono PCM WAV (Whisper's preferred format)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".audio") as f_in:
+                    f_in.write(_raw)
+                    in_path = f_in.name
+
+                wav_path = in_path + "_16k.wav"
                 try:
-                    import soundfile as _sf_w
-                    _arr, _fsr = _sf_w.read(io.BytesIO(_raw), dtype="float32", always_2d=False)
-                    if _arr.ndim > 1:
-                        _arr = _arr.mean(axis=1)
-                    # Resample to 16kHz for Whisper
-                    if _fsr != 16000:
-                        from scipy import signal as _sig
-                        _arr = _sig.resample(_arr, int(len(_arr) * 16000 / _fsr)).astype(np.float32)
-                    # Write proper 16kHz mono WAV
-                    _wav_buf = io.BytesIO()
-                    with wave.open(_wav_buf, "wb") as _wf:
-                        _wf.setnchannels(1)
-                        _wf.setsampwidth(2)
-                        _wf.setframerate(16000)
-                        _pcm16 = (_arr * 32767).clip(-32768, 32767).astype(np.int16)
-                        _wf.writeframes(_pcm16.tobytes())
-                    _wav_buf.seek(0)
-
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as _f:
-                        _f.write(_wav_buf.read())
-                        _audio_path = _f.name
-                except Exception:
-                    # Fallback: write raw bytes directly
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as _f:
-                        _f.write(_raw)
-                        _audio_path = _f.name
-
-                try:
-                    whisper_raw = transcribe_audio(_audio_path)
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-i", in_path,
+                         "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                         wav_path],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=30,
+                    )
+                    whisper_raw = transcribe_audio(wav_path)
                 finally:
-                    try:
-                        os.unlink(_audio_path)
-                    except Exception:
-                        pass
+                    try: os.unlink(in_path)
+                    except Exception: pass
+                    try: os.unlink(wav_path)
+                    except Exception: pass
 
             with st.spinner("Applying aviation correction..."):
                 corrected = mistral_aviation_correct(whisper_raw)
                 st.session_state[state_key] = corrected
 
             st.markdown(f"""<div style="background:rgba(45,204,143,0.06);
-            border:1px solid rgba(45,204,143,0.2);border-radius:4px;padding:10px 14px;
-            margin:6px 0;font-family:var(--font-mono);font-size:0.8rem;color:#a0d8b8">
-            ✓ <strong>Corrected:</strong> {corrected}</div>""", unsafe_allow_html=True)
+            border:1px solid rgba(45,204,143,0.2);border-radius:4px;
+            padding:10px 14px;margin:6px 0;font-family:var(--font-mono);
+            font-size:0.8rem;color:#a0d8b8">
+            ✓ <strong>Corrected:</strong> {corrected}</div>""",
+            unsafe_allow_html=True)
 
             if whisper_raw.lower().strip() != corrected.lower().strip():
                 st.caption(f"Whisper heard: \"{whisper_raw}\"")
 
-    else:
-        stored = st.session_state.get(state_key, "")
-        if stored:
-            st.markdown(f"""<div style="background:rgba(45,204,143,0.06);
-            border:1px solid rgba(45,204,143,0.2);border-radius:4px;padding:10px 14px;
-            margin:6px 0;font-family:var(--font-mono);font-size:0.8rem;color:#a0d8b8">
-            ✓ <strong>Last:</strong> {stored}</div>""", unsafe_allow_html=True)
-
     stored_transcript = st.session_state.get(state_key, "")
     if stored_transcript:
+        if not _audio_input:
+            st.markdown(f"""<div style="background:rgba(45,204,143,0.06);
+            border:1px solid rgba(45,204,143,0.2);border-radius:4px;
+            padding:10px 14px;margin:6px 0;font-family:var(--font-mono);
+            font-size:0.8rem;color:#a0d8b8">
+            ✓ <strong>Last:</strong> {stored_transcript}</div>""",
+            unsafe_allow_html=True)
         if st.button("Submit Voice Readback", use_container_width=True,
                      key=f"{widget_key}_voice_submit"):
             st.session_state[submit_key] = True
 
     st.markdown('</div>', unsafe_allow_html=True)
     return stored_transcript
+
+
 
 
 #  MODULE 3 — RL ENGINE
@@ -1774,7 +1810,7 @@ with tab1:
             </div>""", unsafe_allow_html=True)
 
     col_rec1, col_up1, col_conf1 = st.columns([2,1,1])
-    with col_rec1:
+  with col_rec1:
         st.markdown("""<div style="font-family:var(--font-mono);font-size:0.62rem;
         letter-spacing:0.18em;text-transform:uppercase;color:var(--accent-blue);
         margin-bottom:4px">🎙 Record Transmission</div>""", unsafe_allow_html=True)
@@ -1789,30 +1825,20 @@ with tab1:
         if _m1_audio_input is not None:
             _raw = _m1_audio_input.read()
             _content_hash = hash(_raw[:1024])
+
             if _content_hash != st.session_state.get("_m1_last_audio_hash", None):
                 st.session_state["_m1_last_audio_hash"] = _content_hash
 
                 with st.spinner("Analyzing transmission..."):
                     try:
-                        import io, soundfile as _sf_m1
-                        _raw = _m1_audio_input.read()
-                        _audio_arr, _fsr = _sf_m1.read(
-                            io.BytesIO(_raw), dtype="float32", always_2d=False
-                        )
-                        if _audio_arr.ndim > 1:
-                            _audio_arr = _audio_arr.mean(axis=1)
-                        if _fsr != SR:
-                            from scipy import signal as _sig
-                            _audio_arr = _sig.resample(
-                                _audio_arr, int(len(_audio_arr) * SR / _fsr)
-                            ).astype(np.float32)
+                        import io
+                        # Re-wrap bytes since we already called .read()
+                        _m1_audio_input.seek(0)
+                        _audio_arr = audio_input_to_array(_m1_audio_input, target_sr=SR)
 
                         _dur = len(_audio_arr) / SR
                         if _dur < 3.0:
-                            st.warning(
-                                f"⚠️ Only {_dur:.1f}s recorded — speak for at least "
-                                "5 seconds for reliable analysis."
-                            )
+                            st.warning(f"⚠️ Only {_dur:.1f}s — speak for at least 5 seconds.")
 
                         ab    = _audio_arr.astype(np.float32).tobytes()
                         feats = extract_all_features(ab, SR)
@@ -1832,6 +1858,7 @@ with tab1:
                         import traceback
                         st.error(f"Analysis error: {_e}")
                         st.code(traceback.format_exc())
+
     with col_up1:
         uploaded1=st.file_uploader("Upload Audio",type=['wav','mp3','ogg','flac'],label_visibility='collapsed',key="m1_upload")
         if uploaded1:
