@@ -1787,9 +1787,10 @@ with tab1:
         )
 
         if _m1_audio_input is not None:
-            _m1_cur_id = id(_m1_audio_input)   # changes each new recording
-            if _m1_cur_id != st.session_state.get("_m1_last_audio_id", -1):
-                st.session_state["_m1_last_audio_id"] = _m1_cur_id
+            _raw = _m1_audio_input.read()
+            _content_hash = hash(_raw[:1024])
+            if _content_hash != st.session_state.get("_m1_last_audio_hash", None):
+                st.session_state["_m1_last_audio_hash"] = _content_hash
 
                 with st.spinner("Analyzing transmission..."):
                     try:
