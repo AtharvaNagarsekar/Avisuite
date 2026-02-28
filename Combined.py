@@ -10,7 +10,7 @@ import pandas as pd
 from streamlit_mic_recorder import mic_recorder
 import tempfile
 import os
-
+from audiorecorder import audiorecorder
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
@@ -1329,7 +1329,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 # FIX: sounddevice block replaced with upload-only on Streamlit Cloud
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
-    # Header columns
+    # Header & risk level summary
     col_main1, col_side1 = st.columns([3, 1])
     with col_main1:
         st.markdown(
@@ -1350,122 +1350,122 @@ with tab1:
             </div>""", unsafe_allow_html=True)
 
     # ────────────────────────────────────────────────────────────────
-    #   MICROPHONE RECORDER + ANALYSIS (same style as other tabs)
+    #   VOICE CAPTURE SECTION — same style as other tabs
     # ────────────────────────────────────────────────────────────────
 
-    st.markdown("### Record Voice Sample")
-    st.caption("Speak naturally for 10–60 seconds → analysis starts when you stop")
+    st.markdown("### Capture Voice Sample for Analysis")
+    st.caption("Speak naturally (10–60 seconds recommended) → analysis starts when you stop recording")
 
-    recorded_audio = mic_recorder(
+    # Browser microphone recorder (same component as Pilot Whisperer / Scenario Synth)
+    recorded_bytes = mic_recorder(
         start_prompt="🎤 Start Recording",
         stop_prompt="■ Stop & Analyze",
         just_once=False,
         use_waveform=True,
-        key="fatigue_mic_recorder"
+        key="fatigue_analyzer_recorder"
     )
 
-    if recorded_audio:
-        # New recording detected
-        with st.spinner("Processing recorded audio..."):
+    if recorded_bytes:
+        with st.spinner("Processing your voice recording..."):
             try:
-                # Temporary file (needed for load_audio_file)
+                # Save bytes to temporary file (needed for load_audio_file)
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                    tmp.write(recorded_audio)
-                    temp_path = tmp.name
+                    tmp.write(recorded_bytes)
+                    temp_file_path = tmp.name
 
-                # Your existing loading + analysis pipeline
-                audio_array = load_audio_file(temp_path, sr=SR)
-                audio_bytes = audio_array.astype(np.float32).tobytes()
+                # Load and analyze — using your existing functions
+                audio_data = load_audio_file(temp_file_path, sr=SR)
+                analysis_bytes = audio_data.astype(np.float32).tobytes()
 
-                features = extract_all_features(audio_bytes, SR)
-                indicators = compute_indicators(features, m1_role)
+                extracted_features = extract_all_features(analysis_bytes, SR)
+                computed_indicators = compute_indicators(extracted_features, m1_role)
 
-                # Save results
-                st.session_state.m1_results = indicators
-                st.session_state.m1_features = features
+                # Store results
+                st.session_state.m1_results = computed_indicators
+                st.session_state.m1_features = extracted_features
 
                 st.session_state.m1_history.append({
                     'time': datetime.now().strftime("%H:%M:%S"),
                     'role': m1_role,
-                    **{k: indicators[k] for k in [
-                        'fatigue','stress','cognitive','rt_clarity',
-                        'composite','risk_level','confidence'
+                    **{k: computed_indicators[k] for k in [
+                        'fatigue', 'stress', 'cognitive', 'rt_clarity',
+                        'composite', 'risk_level', 'confidence'
                     ]}
                 })
 
-                st.success("Analysis complete – see results below")
-                st.audio(recorded_audio, format="audio/wav")
+                st.success("Voice analysis complete — see results below")
+                st.audio(recorded_bytes, format="audio/wav")
 
-            except Exception as e:
-                st.error(f"Error during processing: {str(e)}")
+            except Exception as processing_error:
+                st.error(f"Could not analyze recording: {str(processing_error)}")
 
             finally:
-                # Clean up temp file (safe even on Cloud)
-                if 'temp_path' in locals():
+                # Clean up temp file
+                if 'temp_file_path' in locals():
                     try:
-                        os.unlink(temp_path)
+                        os.unlink(temp_file_path)
                     except:
                         pass
 
     # ────────────────────────────────────────────────────────────────
-    #   FILE UPLOAD fallback
+    #   FILE UPLOAD OPTION
     # ────────────────────────────────────────────────────────────────
 
-    st.markdown("**— or upload an audio file —**")
-    uploaded = st.file_uploader(
-        "WAV, MP3, OGG, FLAC (5–60 s recommended)",
+    st.markdown("**— or upload an existing audio file —**")
+    uploaded_file = st.file_uploader(
+        label="WAV / MP3 / OGG / FLAC (5–60 seconds recommended)",
         type=["wav", "mp3", "ogg", "flac"],
-        key="fatigue_upload",
+        key="fatigue_file_uploader",
         label_visibility="collapsed"
     )
 
-    if uploaded is not None:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded.name)[1]) as tmp:
-            tmp.write(uploaded.read())
-            upload_path = tmp.name
+    if uploaded_file is not None:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_upload:
+            tmp_upload.write(uploaded_file.read())
+            upload_temp_path = tmp_upload.name
 
-        with st.spinner("Analyzing uploaded file..."):
+        with st.spinner("Analyzing uploaded audio..."):
             try:
-                audio_array = load_audio_file(upload_path, sr=SR)
-                audio_bytes = audio_array.astype(np.float32).tobytes()
+                audio_data = load_audio_file(upload_temp_path, sr=SR)
+                analysis_bytes = audio_data.astype(np.float32).tobytes()
 
-                features = extract_all_features(audio_bytes, SR)
-                indicators = compute_indicators(features, m1_role)
+                extracted_features = extract_all_features(analysis_bytes, SR)
+                computed_indicators = compute_indicators(extracted_features, m1_role)
 
-                st.session_state.m1_results = indicators
-                st.session_state.m1_features = features
+                st.session_state.m1_results = computed_indicators
+                st.session_state.m1_features = extracted_features
 
                 st.session_state.m1_history.append({
                     'time': datetime.now().strftime("%H:%M:%S"),
                     'role': m1_role,
-                    **{k: indicators[k] for k in [
-                        'fatigue','stress','cognitive','rt_clarity',
-                        'composite','risk_level','confidence'
+                    **{k: computed_indicators[k] for k in [
+                        'fatigue', 'stress', 'cognitive', 'rt_clarity',
+                        'composite', 'risk_level', 'confidence'
                     ]}
                 })
 
-                st.success("Upload analyzed")
-                st.audio(uploaded)
+                st.success("Upload analyzed successfully")
+                st.audio(uploaded_file)
 
-            except Exception as e:
-                st.error(f"Upload processing failed: {str(e)}")
+            except Exception as upload_error:
+                st.error(f"Upload analysis failed: {str(upload_error)}")
 
             finally:
-                if 'upload_path' in locals():
+                if 'upload_temp_path' in locals():
                     try:
-                        os.unlink(upload_path)
+                        os.unlink(upload_temp_path)
                     except:
                         pass
 
+    st.markdown("---")
+
     # ────────────────────────────────────────────────────────────────
-    #   The rest — visualizations, metrics, plots, report (unchanged)
+    #   RESULTS DISPLAY (your original code — unchanged)
     # ────────────────────────────────────────────────────────────────
 
     if st.session_state.m1_results and st.session_state.m1_features:
         ind = st.session_state.m1_results
         feat = st.session_state.m1_features
-
-        st.markdown("---")
 
         st.markdown(f"""
         <div class="info-strip">
@@ -1480,17 +1480,61 @@ with tab1:
         </div>""", unsafe_allow_html=True)
 
         c1, c2, c3, c4 = st.columns(4)
-        with c1: render_metric_card("Fatigue", f"{ind['fatigue']:.0f}", severity_label(ind['fatigue']), "Energy · HNR · Shimmer · Pauses", ind['fatigue'], ind['fatigue'])
-        with c2: render_metric_card("Stress", f"{ind['stress']:.0f}", severity_label(ind['stress']), "F0 Elevation · Jitter · Flux", ind['stress'], ind['stress'])
-        with c3: render_metric_card("Cognitive Load", f"{ind['cognitive']:.0f}", severity_label(ind['cognitive']), "Hesitations · Rhythm · LPC", ind['cognitive'], ind['cognitive'])
-        with c4: render_metric_card("RT Clarity", f"{ind['rt_clarity']:.0f}", "Readback Quality", "HNR · Jitter · Speech Rate", ind['rt_clarity'], 100 - ind['rt_clarity'])
+        with c1:
+            render_metric_card("Fatigue", f"{ind['fatigue']:.0f}", severity_label(ind['fatigue']),
+                              "Energy · HNR · Shimmer · Pauses", ind['fatigue'], ind['fatigue'])
+        with c2:
+            render_metric_card("Stress", f"{ind['stress']:.0f}", severity_label(ind['stress']),
+                              "F0 Elevation · Jitter · Flux", ind['stress'], ind['stress'])
+        with c3:
+            render_metric_card("Cognitive Load", f"{ind['cognitive']:.0f}", severity_label(ind['cognitive']),
+                              "Hesitations · Rhythm · LPC", ind['cognitive'], ind['cognitive'])
+        with c4:
+            render_metric_card("RT Clarity", f"{ind['rt_clarity']:.0f}", "Readback Quality",
+                              "HNR · Jitter · Speech Rate", ind['rt_clarity'], 100 - ind['rt_clarity'])
 
         st.markdown("<br>", unsafe_allow_html=True)
 
         vtab1, vtab2, vtab3, vtab4 = st.tabs(["Visualizations", "Sub-Scores", "Feature Table", "Trend"])
-        # ... (keep the rest of your visualization code exactly as it was)
-        # vtab1, vtab2, vtab3, vtab4 content remains unchanged
-        # ...
+
+        with vtab1:
+            vg, vr, vf = st.columns([1, 1, 2])
+            with vg:
+                st.plotly_chart(fig_risk_gauge(ind['composite']), use_container_width=True, config={'displayModeBar':False})
+                st.markdown('<div style="text-align:center;font-family:var(--font-mono);font-size:0.56rem;letter-spacing:0.15em;color:var(--text-muted);text-transform:uppercase">Composite Risk</div>', unsafe_allow_html=True)
+            with vr:
+                st.plotly_chart(fig_radar(ind), use_container_width=True, config={'displayModeBar':False})
+            with vf:
+                f0t = feat.get('_f0_track', [])
+                if f0t:
+                    st.plotly_chart(fig_f0_track(f0t, SR), use_container_width=True, config={'displayModeBar':False})
+                mfcc_d = feat.get('_mfcc', [])
+                if mfcc_d:
+                    st.plotly_chart(fig_mfcc_heatmap(mfcc_d), use_container_width=True, config={'displayModeBar':False})
+
+        with vtab2:
+            cs1, cs2, cs3 = st.columns(3)
+            with cs1:
+                st.plotly_chart(fig_sub_breakdown(ind['fat_subs'],'Fatigue Contributors','#e84040'), use_container_width=True, config={'displayModeBar':False})
+            with cs2:
+                st.plotly_chart(fig_sub_breakdown(ind['stre_subs'],'Stress Contributors','#f0a030'), use_container_width=True, config={'displayModeBar':False})
+            with cs3:
+                st.plotly_chart(fig_sub_breakdown(ind['cog_subs'],'Cognitive Contributors','#8b5cf6'), use_container_width=True, config={'displayModeBar':False})
+
+        with vtab3:
+            disp = {k:v for k,v in feat.items() if not k.startswith('_')}
+            df_f = pd.DataFrame([{'Feature':k,'Value':f"{v:.5f}" if isinstance(v,float) else str(v)} for k,v in disp.items()])
+            st.dataframe(df_f, use_container_width=True, height=400)
+
+        with vtab4:
+            if len(st.session_state.m1_history) >= 2:
+                fig_t = fig_session_trend(st.session_state.m1_history)
+                if fig_t:
+                    st.plotly_chart(fig_t, use_container_width=True, config={'displayModeBar':False})
+            if st.session_state.m1_history:
+                st.dataframe(pd.DataFrame(st.session_state.m1_history).round(1), use_container_width=True)
+            else:
+                st.caption("Record 2+ sessions to see trend.")
 
         st.markdown("---")
         st.markdown('<div class="section-label">Aviation Analysis Report</div>', unsafe_allow_html=True)
@@ -1498,10 +1542,11 @@ with tab1:
 
     else:
         st.markdown("""
-        <div style="text-align:center;padding:60px 20px;border:1px dashed var(--border);border-radius:6px;margin-top:16px">
+        <div style="text-align:center;padding:60px 20px;border:1px dashed var(--border);
+        border-radius:6px;margin-top:16px">
             <div style="font-size:2.5rem;opacity:0.12;margin-bottom:14px">🎙</div>
-            <div style="font-family:var(--font-display);font-size:1rem;color:var(--text-muted);letter-spacing:0.08em">Ready to analyze</div>
-            <div style="font-family:var(--font-mono);font-size:0.65rem;margin-top:8px;color:var(--text-muted)">Record voice above or upload file</div>
+            <div style="font-family:var(--font-display);font-size:1rem;color:var(--text-muted);letter-spacing:0.08em">Awaiting Voice Sample</div>
+            <div style="font-family:var(--font-mono);font-size:0.65rem;margin-top:8px;color:var(--text-muted)">Record above or upload audio file · Minimum 5 seconds recommended</div>
         </div>""", unsafe_allow_html=True)
 with tab2:
     st.markdown('<div class="section-label">Live ATC Radio Discipline Coach · Whisper STT · Mistral NLP</div>', unsafe_allow_html=True)
