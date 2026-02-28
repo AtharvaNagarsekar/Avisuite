@@ -888,7 +888,7 @@ def transcribe_audio(audio_path: str) -> str:
         converted = audio_path
 
     try:
-        model = whisper_lib.load_model("base")  # Use 'base' on cloud (faster/lighter)
+        model = whisper_lib.load_model("large")  # Use 'base' on cloud (faster/lighter)
         result = model.transcribe(
             converted, fp16=False, language="en",
             condition_on_previous_text=False, word_timestamps=True,
@@ -1589,7 +1589,7 @@ with tab2:
             @st.cache_resource
             def load_whisper_model():
                 import whisper as wlib
-                return wlib.load_model("base")  # 'base' is faster on cloud
+                return wlib.load_model("large")  # 'base' is faster on cloud
 
             m2_status_ph   = st.empty()
             m2_audio_ph    = st.empty()
