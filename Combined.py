@@ -224,8 +224,8 @@ PRE_EMP  = 0.97
 
 MISTRAL_API_KEY = st.secrets["MISTRAL_API_KEY"]
 MISTRAL_API_URL = st.secrets["MISTRAL_API_URL"]
-MISTRAL_MODEL   = "mistral-large-latest"
-LIVEATC_URL     = "https://d.liveatc.net/kaus3_app_dep"
+MISTRAL_MODEL   = st.secrets["MISTRAL_MODEL"]
+LIVEATC_URL     = st.secrets["LIVEATC_URL"]
 
 RISK_COLORS = {"NOMINAL":"#2dcc8f","MONITOR":"#f0a030","CAUTION":"#e85020","ALERT":"#e84040"}
 
@@ -739,7 +739,11 @@ def load_audio_file(path, sr=SR):
 #  FIX: ffmpeg calls wrapped with FFMPEG_AVAILABLE guard + timeout + returncode check
 # ══════════════════════════════════════════════════════════════════════════════
 def capture_audio_stream(url, seconds):
-    """Capture live ATC stream. Raises RuntimeError if ffmpeg unavailable."""
+    """
+    Capture live ATC stream via ffmpeg.
+    Supports HLS (.m3u8), direct MP3/AAC streams, and icecast feeds.
+    Raises RuntimeError with the actual ffmpeg stderr on failure.
+    """
     if not FFMPEG_AVAILABLE:
         raise RuntimeError(
             "ffmpeg is not installed on this server.\n"
@@ -749,18 +753,40 @@ def capture_audio_stream(url, seconds):
         path = f.name
     try:
         result = subprocess.run(
-            ["ffmpeg", "-y", "-i", url, "-t", str(seconds), "-vn",
-             "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", path],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            timeout=seconds + 30,
+            [
+                "ffmpeg", "-y",
+                # HLS / network stream flags — required for LiveATC .m3u8 feeds
+                "-protocol_whitelist", "file,http,https,tcp,tls,crypto,hls,applehttp",
+                "-allowed_extensions", "ALL",
+                # reconnect on drop (common with live streams)
+                "-reconnect", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "5",
+                "-i", url,
+                "-t", str(seconds),
+                "-vn",
+                "-acodec", "pcm_s16le",
+                "-ar", "16000",
+                "-ac", "1",
+                path,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,          # capture stderr so we can show it
+            timeout=seconds + 60,
         )
         if result.returncode != 0:
+            stderr_text = result.stderr.decode("utf-8", errors="replace")[-800:]
             raise RuntimeError(
-                f"ffmpeg exited with code {result.returncode}. "
-                "Check LIVEATC_URL in your Streamlit secrets."
+                f"ffmpeg exited with code {result.returncode}.\n\n"
+                f"ffmpeg output:\n{stderr_text}\n\n"
+                f"Check your LIVEATC_URL in Streamlit secrets. "
+                f"The URL must be a direct audio stream (MP3/AAC/HLS .m3u8)."
             )
     except subprocess.TimeoutExpired:
-        raise RuntimeError("ffmpeg capture timed out. Check your LIVEATC_URL.")
+        raise RuntimeError(
+            f"ffmpeg timed out after {seconds + 60}s. "
+            "Check your LIVEATC_URL — the stream may be offline or geo-blocked."
+        )
     return path
 
 def mistral_chat(prompt: str, max_tokens: int=1200, stream: bool=False):
@@ -1400,9 +1426,13 @@ with tab1:
                 prog=st.progress(0)
                 try:
                     import sounddevice as sd
-                    for i in range(m1_dur*10): time.sleep(0.1); prog.progress((i+1)/(m1_dur*10))
+                    # ── Start recording FIRST, then show progress while it captures ──
+                    rec = sd.rec(int(m1_dur * SR), samplerate=SR, channels=1, dtype='float32')
+                    for i in range(m1_dur * 10):
+                        time.sleep(0.1)
+                        prog.progress((i + 1) / (m1_dur * 10))
+                    sd.wait()  # block until recording finishes
                     with st.spinner("Analyzing..."):
-                        rec=sd.rec(int(m1_dur*SR),samplerate=SR,channels=1,dtype='float32'); sd.wait()
                         audio=rec.flatten(); ab=audio.astype(np.float32).tobytes()
                         feats=extract_all_features(ab,SR); ind=compute_indicators(feats,m1_role)
                         st.session_state.m1_results=ind; st.session_state.m1_features=feats
@@ -1698,7 +1728,20 @@ with tab2:
                                 st.markdown(f'<div class="data-panel" style="font-size:0.78rem;color:var(--text-secondary);line-height:1.7">{analysis.get("coach_summary","")}</div>', unsafe_allow_html=True)
 
                 except Exception as e:
-                    m2_status_ph.error(f"Capture error (cycle {cycle_count}): {e}")
+                    err_msg = str(e)
+                    m2_status_ph.error(f"Capture error (cycle {cycle_count}): {err_msg[:600]}")
+                    # Show structured ffmpeg error if present
+                    if "ffmpeg output:" in err_msg:
+                        with m2_results_ph.container():
+                            st.markdown(f"""<div class="cloud-warning">
+                            <strong>ffmpeg diagnostic output:</strong><br>
+                            <pre style="font-size:0.65rem;color:#f8c060;white-space:pre-wrap;word-break:break-all">{err_msg}</pre>
+                            <br>Common causes:<br>
+                            • LIVEATC_URL is wrong or stream is offline<br>
+                            • Stream is geo-blocked from Streamlit Cloud servers<br>
+                            • URL needs to be a direct .mp3 or .m3u8 stream link, not a webpage<br>
+                            Try: <code>https://www.liveatc.net/play/kjfk_app.pls</code> → right-click → copy direct stream URL
+                            </div>""", unsafe_allow_html=True)
                     time.sleep(5)
 
                 time.sleep(1)
@@ -1831,7 +1874,7 @@ with tab3:
                     color:{'var(--accent-red)' if is_urg3 else 'var(--text-muted)'}">{s_type3}</span>
                     <span style="font-family:var(--font-mono);font-size:0.6rem;color:var(--text-muted)">{sc3.get('scenario_id','')}</span>
                     {'<span style="font-family:var(--font-mono);font-size:0.6rem;background:rgba(232,64,64,0.1);color:var(--accent-red);border:1px solid rgba(232,64,64,0.2);border-radius:2px;padding:2px 8px">URGENT</span>' if is_urg3 else ''}
-                    </div>""", unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
 
                     st.markdown('<div class="section-label">Situation Briefing</div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="atc-box">{sc3.get("situation_briefing","")}</div>', unsafe_allow_html=True)
