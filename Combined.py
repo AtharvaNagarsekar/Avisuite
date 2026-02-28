@@ -1,13 +1,3 @@
-"""
-╔══════════════════════════════════════════════════════════════════════════════╗
-║  AviSuite — Unified Aviation Speech Intelligence Platform                   ║
-║  Module 1 · Fatigue Analyzer      (DSP fatigue/stress/cognitive)           ║
-║  Module 2 · Pilot Whisperer       (Live ATC radio discipline coach)         ║
-║  Module 3 · ScenarioSynth         (Generative ATC training engine)          ║
-║  ⚠️  Research / Training Use Only · NOT a certified flight-safety device     ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-"""
-
 import streamlit as st
 import numpy as np
 from scipy import signal
@@ -21,24 +11,20 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 import requests
-
 warnings.filterwarnings("ignore")
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  CLOUD COMPATIBILITY — detect system capabilities at startup
-#  Streamlit Cloud may not have ffmpeg or sounddevice available.
-#  These flags gate features gracefully instead of crashing.
+# CLOUD COMPATIBILITY — detect system capabilities at startup
+# Streamlit Cloud may not have ffmpeg or sounddevice available.
+# These flags gate features gracefully instead of crashing.
 # ══════════════════════════════════════════════════════════════════════════════
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
-
 try:
     import sounddevice as _sd_probe
     SOUNDDEVICE_AVAILABLE = True
 except Exception:
     SOUNDDEVICE_AVAILABLE = False
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  PAGE CONFIG
+# PAGE CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
 st.set_page_config(
     page_title="AviSuite — Aviation Speech Intelligence",
@@ -46,46 +32,40 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  PROFESSIONAL CSS
+# PROFESSIONAL CSS
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@300;400;500&family=Syne:wght@600;700;800&display=swap');
-
 :root {
-    --bg-base:       #0c0e14;
-    --bg-surface:    #111420;
-    --bg-elevated:   #161a28;
-    --bg-card:       #1a1f30;
-    --border:        #242840;
+    --bg-base: #0c0e14;
+    --bg-surface: #111420;
+    --bg-elevated: #161a28;
+    --bg-card: #1a1f30;
+    --border: #242840;
     --border-active: #3a4060;
-    --text-primary:  #e8eaf0;
+    --text-primary: #e8eaf0;
     --text-secondary:#8890b0;
-    --text-muted:    #4a5070;
-    --accent-blue:   #4d7cfe;
-    --accent-cyan:   #00c8e8;
-    --accent-green:  #2dcc8f;
-    --accent-amber:  #f0a030;
-    --accent-red:    #e84040;
+    --text-muted: #4a5070;
+    --accent-blue: #4d7cfe;
+    --accent-cyan: #00c8e8;
+    --accent-green: #2dcc8f;
+    --accent-amber: #f0a030;
+    --accent-red: #e84040;
     --accent-violet: #8b5cf6;
-    --font-body:     'DM Sans', sans-serif;
-    --font-mono:     'DM Mono', monospace;
-    --font-display:  'Syne', sans-serif;
+    --font-body: 'DM Sans', sans-serif;
+    --font-mono: 'DM Mono', monospace;
+    --font-display: 'Syne', sans-serif;
 }
-
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
 html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
     background: var(--bg-base) !important;
     color: var(--text-primary) !important;
     font-family: var(--font-body) !important;
     font-size: 14px;
 }
-
 [data-testid="stAppViewContainer"] { background: var(--bg-base) !important; }
-
 [data-testid="stMain"]::before {
     content: '';
     position: fixed;
@@ -97,7 +77,6 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
     pointer-events: none;
     z-index: 0;
 }
-
 [data-testid="stSidebar"] {
     background: var(--bg-surface) !important;
     border-right: 1px solid var(--border) !important;
@@ -110,7 +89,6 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
     text-transform: uppercase;
     color: var(--text-muted) !important;
 }
-
 .suite-header {
     background: var(--bg-surface);
     border: 1px solid var(--border);
@@ -129,14 +107,11 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
 .suite-title { font-family: var(--font-display); font-size: 2rem; font-weight: 800; color: var(--text-primary); letter-spacing: 0.06em; line-height: 1; }
 .suite-subtitle { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-muted); margin-top: 8px; }
 .suite-badge { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--accent-amber); background: rgba(240,160,48,0.08); border: 1px solid rgba(240,160,48,0.2); border-radius: 2px; padding: 3px 10px; margin-top: 10px; }
-
 .stTabs [data-baseweb="tab-list"] { background: var(--bg-surface) !important; border: 1px solid var(--border) !important; border-top: none !important; border-radius: 0 0 6px 6px !important; gap: 0 !important; padding: 0 !important; }
 .stTabs [data-baseweb="tab"] { font-family: var(--font-body) !important; font-size: 0.75rem !important; font-weight: 500 !important; letter-spacing: 0.05em !important; text-transform: uppercase !important; color: var(--text-muted) !important; padding: 14px 22px !important; border-right: 1px solid var(--border) !important; border-radius: 0 !important; min-width: 160px; transition: color 0.2s; }
 .stTabs [aria-selected="true"] { color: var(--text-primary) !important; background: rgba(77,124,254,0.06) !important; border-bottom: 2px solid var(--accent-blue) !important; }
 .stTabs [data-baseweb="tab-panel"] { background: transparent !important; padding: 24px 0 0 !important; }
-
 .section-label { font-family: var(--font-mono); font-size: 0.6rem; font-weight: 500; letter-spacing: 0.25em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px; margin-top: 20px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
-
 .metric-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 18px 16px 14px; position: relative; overflow: hidden; }
 .metric-card::after { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--accent, var(--accent-blue)); opacity: 0.7; }
 .metric-label { font-family: var(--font-mono); font-size: 0.58rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; }
@@ -144,15 +119,12 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
 .metric-sub { font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent, var(--accent-blue)); margin-top: 5px; opacity: 0.75; }
 .metric-bar-track { background: var(--bg-base); border-radius: 2px; height: 2px; margin-top: 12px; }
 .metric-bar-fill { height: 100%; border-radius: 2px; background: var(--accent, var(--accent-blue)); }
-
 .data-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 16px 18px; margin: 8px 0; }
 .data-panel-header { font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
-
 .status-nominal { background: rgba(45,204,143,0.1); border: 1px solid rgba(45,204,143,0.25); border-left: 3px solid var(--accent-green); border-radius: 4px; padding: 10px 14px; font-family: var(--font-mono); font-size: 0.72rem; color: #6eddb8; }
 .status-monitor { background: rgba(240,160,48,0.08); border: 1px solid rgba(240,160,48,0.2); border-left: 3px solid var(--accent-amber); border-radius: 4px; padding: 10px 14px; font-family: var(--font-mono); font-size: 0.72rem; color: #f8c060; }
 .status-caution { background: rgba(232,80,0,0.08); border: 1px solid rgba(232,80,0,0.2); border-left: 3px solid #e85020; border-radius: 4px; padding: 10px 14px; font-family: var(--font-mono); font-size: 0.72rem; color: #f89060; }
-.status-alert   { background: rgba(232,64,64,0.08); border: 1px solid rgba(232,64,64,0.2); border-left: 3px solid var(--accent-red); border-radius: 4px; padding: 10px 14px; font-family: var(--font-mono); font-size: 0.72rem; color: #f08080; }
-
+.status-alert { background: rgba(232,64,64,0.08); border: 1px solid rgba(232,64,64,0.2); border-left: 3px solid var(--accent-red); border-radius: 4px; padding: 10px 14px; font-family: var(--font-mono); font-size: 0.72rem; color: #f08080; }
 .atc-box { background: var(--bg-elevated); border: 1px solid var(--border); border-left: 3px solid var(--accent-blue); border-radius: 0 6px 6px 0; padding: 16px 20px; margin: 8px 0; font-family: var(--font-mono); font-size: 0.85rem; line-height: 1.8; color: #b8cce8; }
 .pilot-box { background: var(--bg-elevated); border: 1px solid var(--border); border-left: 3px solid var(--accent-green); border-radius: 0 6px 6px 0; padding: 16px 20px; margin: 8px 0; font-family: var(--font-mono); font-size: 0.85rem; line-height: 1.8; color: #a8e8c0; }
 .emergency-box { background: rgba(232,64,64,0.04); border: 1px solid rgba(232,64,64,0.2); border-left: 3px solid var(--accent-red); border-radius: 0 6px 6px 0; padding: 16px 20px; margin: 8px 0; font-family: var(--font-mono); font-size: 0.85rem; line-height: 1.8; color: #f0a8a8; }
@@ -162,45 +134,34 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
 .whisper-panel { background: var(--bg-elevated); border: 1px solid var(--border); border-top: 2px solid var(--accent-green); border-radius: 0 0 6px 6px; padding: 16px 18px; margin: 4px 0 8px; }
 .info-strip { display: flex; flex-wrap: wrap; gap: 20px; font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); padding: 10px 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; margin: 8px 0 16px; }
 .info-strip .val { color: var(--accent-cyan); font-weight: 500; }
-
 .risk-pill { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.15em; text-transform: uppercase; border-radius: 3px; padding: 4px 12px; font-weight: 600; }
 .risk-NOMINAL { background: rgba(45,204,143,0.1); color: var(--accent-green); border: 1px solid rgba(45,204,143,0.3); }
 .risk-MONITOR { background: rgba(240,160,48,0.1); color: var(--accent-amber); border: 1px solid rgba(240,160,48,0.3); }
 .risk-CAUTION { background: rgba(232,80,0,0.1); color: #f08040; border: 1px solid rgba(232,80,0,0.3); }
-.risk-ALERT   { background: rgba(232,64,64,0.1); color: var(--accent-red); border: 1px solid rgba(232,64,64,0.3); }
-
+.risk-ALERT { background: rgba(232,64,64,0.1); color: var(--accent-red); border: 1px solid rgba(232,64,64,0.3); }
 .score-display { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 16px 10px; text-align: center; }
 .score-num { font-family: var(--font-display); font-size: 2rem; font-weight: 700; color: var(--accent-cyan); line-height: 1; }
 .score-lbl { font-family: var(--font-mono); font-size: 0.55rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-muted); margin-top: 5px; }
-
 .diff-tag { display: inline-block; font-family: var(--font-mono); font-size: 0.65rem; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; padding: 3px 10px; border-radius: 3px; }
-.diff-student  { background: rgba(45,204,143,0.1); color: var(--accent-green); border: 1px solid rgba(45,204,143,0.25); }
-.diff-private  { background: rgba(77,124,254,0.1); color: var(--accent-blue);  border: 1px solid rgba(77,124,254,0.25); }
+.diff-student { background: rgba(45,204,143,0.1); color: var(--accent-green); border: 1px solid rgba(45,204,143,0.25); }
+.diff-private { background: rgba(77,124,254,0.1); color: var(--accent-blue); border: 1px solid rgba(77,124,254,0.25); }
 .diff-commercial { background: rgba(240,160,48,0.1); color: var(--accent-amber); border: 1px solid rgba(240,160,48,0.25); }
-.diff-expert   { background: rgba(232,64,64,0.1); color: var(--accent-red);   border: 1px solid rgba(232,64,64,0.25); }
-
+.diff-expert { background: rgba(232,64,64,0.1); color: var(--accent-red); border: 1px solid rgba(232,64,64,0.25); }
 div[data-testid="stButton"] > button { background: var(--bg-elevated); border: 1px solid var(--border-active); color: var(--text-secondary); font-family: var(--font-body); font-size: 0.78rem; font-weight: 500; letter-spacing: 0.05em; border-radius: 4px; padding: 9px 18px; transition: all 0.18s; width: 100%; }
 div[data-testid="stButton"] > button:hover { background: rgba(77,124,254,0.1); border-color: var(--accent-blue); color: var(--text-primary); }
-
 .stTextArea textarea, .stTextInput input { background: var(--bg-elevated) !important; border: 1px solid var(--border) !important; color: var(--text-primary) !important; font-family: var(--font-mono) !important; font-size: 0.82rem !important; border-radius: 4px !important; }
 .stTextArea textarea:focus, .stTextInput input:focus { border-color: var(--accent-blue) !important; box-shadow: 0 0 0 2px rgba(77,124,254,0.12) !important; }
 div[data-testid="stSlider"] label, div[data-testid="stSelectbox"] label { font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-muted) !important; }
 div[data-testid="stSelectbox"] > div > div { background: var(--bg-elevated) !important; border-color: var(--border) !important; color: var(--text-primary) !important; font-family: var(--font-body) !important; }
-
 .rec-active { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--accent-red); background: rgba(232,64,64,0.08); border: 1px solid rgba(232,64,64,0.2); border-radius: 3px; padding: 6px 12px; }
 .rec-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-red); animation: blink 1s infinite; }
 @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0.2;} }
-
 .history-row { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; padding: 9px 14px; margin: 3px 0; font-size: 0.78rem; font-family: var(--font-mono); color: var(--text-muted); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-
 .live-badge { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.15em; text-transform: uppercase; color: var(--accent-red); background: rgba(232,64,64,0.08); border: 1px solid rgba(232,64,64,0.2); border-radius: 2px; padding: 2px 8px; }
 .live-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-red); animation: blink 1.2s infinite; }
-
 .guide-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; padding: 18px 20px; margin: 6px 0; font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.9; color: var(--text-secondary); }
 .guide-card strong { color: var(--text-primary); display: block; margin-bottom: 10px; font-family: var(--font-display); font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; }
-
 .cloud-warning { background: rgba(240,160,48,0.06); border: 1px solid rgba(240,160,48,0.2); border-left: 3px solid var(--accent-amber); border-radius: 4px; padding: 12px 16px; margin: 8px 0; font-family: var(--font-mono); font-size: 0.72rem; color: #f8c060; line-height: 1.6; }
-
 #MainMenu, footer { visibility: hidden; }
 hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 .stDataFrame { border: 1px solid var(--border) !important; border-radius: 4px !important; }
@@ -208,37 +169,32 @@ hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 .miscomm-row { background: rgba(240,160,48,0.05); border-left: 3px solid var(--accent-amber); }
 </style>
 """, unsafe_allow_html=True)
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  CONSTANTS
+# CONSTANTS
 # ══════════════════════════════════════════════════════════════════════════════
-SR       = 22050
+SR = 22050
 FRAME_MS = 25
-HOP_MS   = 10
-FRAME_N  = int(SR * FRAME_MS / 1000)
-HOP_N    = int(SR * HOP_MS   / 1000)
-N_MFCC   = 13
-N_LPC    = 16
-PRE_EMP  = 0.97
-
+HOP_MS = 10
+FRAME_N = int(SR * FRAME_MS / 1000)
+HOP_N = int(SR * HOP_MS / 1000)
+N_MFCC = 13
+N_LPC = 16
+PRE_EMP = 0.97
 MISTRAL_API_KEY = st.secrets["MISTRAL_API_KEY"]
 MISTRAL_API_URL = st.secrets["MISTRAL_API_URL"]
-MISTRAL_MODEL   = st.secrets["MISTRAL_MODEL"]
-LIVEATC_URL     = st.secrets["LIVEATC_URL"]
-
+MISTRAL_MODEL = st.secrets["MISTRAL_MODEL"]
+LIVEATC_URL = st.secrets["LIVEATC_URL"]
 RISK_COLORS = {"NOMINAL":"#2dcc8f","MONITOR":"#f0a030","CAUTION":"#e85020","ALERT":"#e84040"}
-
 SCENARIO_TYPES = {
     "Normal Traffic":{"icon":"📻","weight":50},
     "Heavy Traffic" :{"icon":"⚡","weight":30},
-    "Emergency"     :{"icon":"🚨","weight":20},
+    "Emergency" :{"icon":"🚨","weight":20},
 }
 DIFFICULTY_LEVELS = {
-    "Student Pilot" :{"badge":"diff-student",   "speed":"slow",     "complexity":1,"noise":0.0 },
-    "Private Pilot" :{"badge":"diff-private",   "speed":"moderate", "complexity":2,"noise":0.15},
-    "Commercial"    :{"badge":"diff-commercial","speed":"fast",      "complexity":3,"noise":0.35},
-    "Expert / ATPL" :{"badge":"diff-expert",    "speed":"very fast","complexity":4,"noise":0.6 },
+    "Student Pilot" :{"badge":"diff-student", "speed":"slow", "complexity":1,"noise":0.0 },
+    "Private Pilot" :{"badge":"diff-private", "speed":"moderate", "complexity":2,"noise":0.15},
+    "Commercial" :{"badge":"diff-commercial","speed":"fast", "complexity":3,"noise":0.35},
+    "Expert / ATPL" :{"badge":"diff-expert", "speed":"very fast","complexity":4,"noise":0.6 },
 }
 AIRPORTS = [
     "KJFK - John F. Kennedy","EGLL - London Heathrow","OMDB - Dubai International",
@@ -249,10 +205,8 @@ AIRCRAFT_TYPES = [
     "Boeing 737-800","Airbus A320","Boeing 777-300ER","Cessna 172",
     "Piper PA-28","Airbus A380","Embraer E175","Boeing 787-9",
 ]
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  SESSION STATE
+# SESSION STATE
 # ══════════════════════════════════════════════════════════════════════════════
 def init_state():
     defaults = {
@@ -280,75 +234,62 @@ def init_state():
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
-
 init_state()
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  MODULE 1 — DSP CORE
+# MODULE 1 — DSP CORE
 # ══════════════════════════════════════════════════════════════════════════════
 def pre_emphasis(audio, coef=PRE_EMP):
     return np.append(audio[0], audio[1:] - coef * audio[:-1])
-
 def normalize_audio(audio):
     peak = np.max(np.abs(audio))
     return audio / (peak + 1e-9)
-
 def frame_signal(audio, frame_len, hop):
     n_frames = 1 + (len(audio) - frame_len) // hop
     if n_frames <= 0: return np.zeros((1, frame_len))
     idx = np.arange(frame_len)[None,:] + hop * np.arange(n_frames)[:,None]
     return audio[idx]
-
 def apply_window(frames):
     return frames * np.hamming(frames.shape[1])[None,:]
-
 def power_spectrum(frames, n_fft=512):
     return np.abs(rfft(frames, n=n_fft, axis=1)) ** 2
-
 def hz_to_mel(hz): return 2595 * np.log10(1 + hz / 700)
 def mel_to_hz(mel): return 700 * (10 ** (mel / 2595) - 1)
-
 def mel_filterbank(sr=SR, n_fft=512, n_mels=40, fmin=80, fmax=8000):
     n_bins = n_fft // 2 + 1
     mel_pts = np.linspace(hz_to_mel(fmin), hz_to_mel(fmax), n_mels + 2)
-    hz_pts  = mel_to_hz(mel_pts)
+    hz_pts = mel_to_hz(mel_pts)
     bin_pts = np.floor((n_fft+1)*hz_pts/sr).astype(int)
-    fbank   = np.zeros((n_mels, n_bins))
+    fbank = np.zeros((n_mels, n_bins))
     for m in range(1, n_mels+1):
         for k in range(bin_pts[m-1], bin_pts[m]):
             fbank[m-1, k] = (k-bin_pts[m-1])/(bin_pts[m]-bin_pts[m-1]+1e-10)
         for k in range(bin_pts[m], min(bin_pts[m+1], n_bins)):
             fbank[m-1, k] = (bin_pts[m+1]-k)/(bin_pts[m+1]-bin_pts[m]+1e-10)
     return fbank
-
 _FBANK_CACHE = {}
 def get_fbank(sr=SR, n_fft=512, n_mels=40):
     key = (sr, n_fft, n_mels)
     if key not in _FBANK_CACHE: _FBANK_CACHE[key] = mel_filterbank(sr, n_fft, n_mels)
     return _FBANK_CACHE[key]
-
 def compute_mfcc(audio, sr=SR, n_mfcc=N_MFCC, n_fft=512):
-    audio  = pre_emphasis(audio)
+    audio = pre_emphasis(audio)
     frames = frame_signal(audio, FRAME_N, HOP_N)
     frames = apply_window(frames)
-    power  = power_spectrum(frames, n_fft)
-    fbank  = get_fbank(sr, n_fft)
-    mel_e  = np.dot(power, fbank.T)
-    mel_e  = np.where(mel_e < 1e-10, 1e-10, mel_e)
+    power = power_spectrum(frames, n_fft)
+    fbank = get_fbank(sr, n_fft)
+    mel_e = np.dot(power, fbank.T)
+    mel_e = np.where(mel_e < 1e-10, 1e-10, mel_e)
     log_me = np.log(mel_e)
     n_mels = log_me.shape[1]
     dct_mat = np.array([np.cos(np.pi*i/n_mels*(np.arange(n_mels)+0.5)) for i in range(n_mfcc)])
     return (log_me @ dct_mat.T).T
-
 def delta_features(feat, width=2):
-    pad   = np.pad(feat, ((0,0),(width,width)), mode='edge')
+    pad = np.pad(feat, ((0,0),(width,width)), mode='edge')
     denom = 2 * sum(i**2 for i in range(1, width+1))
     delta = np.zeros_like(feat)
     for t in range(feat.shape[1]):
         delta[:,t] = sum(n*(pad[:,t+width+n]-pad[:,t+width-n]) for n in range(1,width+1)) / denom
     return delta
-
 def compute_lpc(frame, order=N_LPC):
     frame = frame * np.hamming(len(frame))
     r = np.correlate(frame, frame, mode='full')
@@ -361,9 +302,8 @@ def compute_lpc(frame, order=N_LPC):
         for j in range(i): a_new[j] = a[j] + lam * a[i-1-j]
         a = a_new; e = max(e*(1-lam**2), 1e-12)
     return a
-
 def compute_lpc_features(audio):
-    frames  = frame_signal(audio, FRAME_N, HOP_N)
+    frames = frame_signal(audio, FRAME_N, HOP_N)
     lpc_all, errors = [], []
     for frame in frames:
         a = compute_lpc(frame); lpc_all.append(a)
@@ -372,7 +312,6 @@ def compute_lpc_features(audio):
     lpc_all = np.array(lpc_all); errors = np.array(errors)
     flux = float(np.mean(np.sqrt(np.sum(np.diff(lpc_all,axis=0)**2,axis=1)))) if len(lpc_all)>1 else 0
     return {'lpc_error_mean':float(np.mean(errors)),'lpc_error_std':float(np.std(errors)),'lpc_flux':flux}
-
 def estimate_f0_frame(frame, sr, f0_min=60, f0_max=500):
     frame = frame * np.hamming(len(frame))
     thresh = 0.3 * np.max(np.abs(frame))
@@ -384,22 +323,19 @@ def estimate_f0_frame(frame, sr, f0_min=60, f0_max=500):
     if not len(peaks): return 0.0
     best = peaks[np.argmax(corr[lag_min:lag_max][peaks])] + lag_min
     return float(sr/best) if corr[best]/(corr[0]+1e-12) >= 0.3 else 0.0
-
 def compute_f0_track(audio, sr=SR):
     return np.array([estimate_f0_frame(f, sr) for f in frame_signal(audio, FRAME_N, HOP_N)])
-
 def compute_hnr(audio, sr=SR):
     frames = frame_signal(audio, FRAME_N, HOP_N); hnrs = []
     for frame in frames:
         frame = frame * np.hamming(len(frame))
-        corr  = np.correlate(frame, frame, mode='full')[len(frame)-1:]
+        corr = np.correlate(frame, frame, mode='full')[len(frame)-1:]
         if corr[0] < 1e-12: continue
         lmin, lmax = int(sr/500), min(int(sr/60), len(corr)-1)
         if lmin >= lmax: continue
         r = np.clip(np.max(corr[lmin:lmax])/(corr[0]+1e-12), 0, 0.9999)
         hnrs.append(10*np.log10(r/(1-r+1e-12)))
     return float(np.mean(hnrs)) if hnrs else 0.0
-
 def compute_jitter_shimmer(audio, sr=SR):
     f0 = compute_f0_track(audio, sr); voiced = f0[f0>0]
     if len(voiced) < 4:
@@ -408,37 +344,35 @@ def compute_jitter_shimmer(audio, sr=SR):
     jitter_local = float(np.mean(np.abs(np.diff(periods)))/(np.mean(periods)+1e-12))
     rap = [abs(periods[i]-np.mean(periods[i-1:i+2])) for i in range(1,len(periods)-1)]
     jitter_rap = float(np.mean(rap)/np.mean(periods)) if rap else 0.0
-    amps  = np.sqrt(np.mean(frame_signal(audio,FRAME_N,HOP_N)**2,axis=1))+1e-12
+    amps = np.sqrt(np.mean(frame_signal(audio,FRAME_N,HOP_N)**2,axis=1))+1e-12
     vamps = amps[:len(f0)][f0>0]
     if len(vamps)<2:
         return {'jitter_local':jitter_local,'jitter_rap':jitter_rap,'shimmer_local':0,'shimmer_db':0}
     sh_local = float(np.mean(np.abs(np.diff(vamps)))/np.mean(vamps))
     return {'jitter_local':jitter_local,'jitter_rap':jitter_rap,
             'shimmer_local':sh_local,'shimmer_db':float(20*np.log10(1+sh_local+1e-12))}
-
 def vad_energy_zcr(audio, sr=SR):
     frames = frame_signal(audio, FRAME_N, HOP_N)
     energy = np.mean(frames**2, axis=1)
-    zcr    = np.mean(np.abs(np.diff(np.sign(frames),axis=1)),axis=1)/2
-    nf     = max(1, int(0.1*sr/HOP_N))
-    e_thr  = np.mean(energy[:nf])*5+1e-12
-    z_thr  = np.mean(zcr[:nf])*2+0.05
+    zcr = np.mean(np.abs(np.diff(np.sign(frames),axis=1)),axis=1)/2
+    nf = max(1, int(0.1*sr/HOP_N))
+    e_thr = np.mean(energy[:nf])*5+1e-12
+    z_thr = np.mean(zcr[:nf])*2+0.05
     return ((energy>e_thr)&(zcr<z_thr)).astype(float)
-
 def compute_spectral_features(audio, sr=SR, n_fft=512):
     frames = frame_signal(audio,FRAME_N,HOP_N)
-    fw     = apply_window(frames)
-    power  = power_spectrum(fw, n_fft)
-    freqs  = rfftfreq(n_fft, 1/sr)
-    psum   = power.sum(axis=1)+1e-12
+    fw = apply_window(frames)
+    power = power_spectrum(fw, n_fft)
+    freqs = rfftfreq(n_fft, 1/sr)
+    psum = power.sum(axis=1)+1e-12
     centroid = (power@freqs)/psum
-    spread   = np.sqrt(np.sum(power*(freqs[None,:]-centroid[:,None])**2,axis=1)/psum)
-    flux     = np.concatenate([[0],np.sqrt(np.sum(np.diff(power,axis=0)**2,axis=1))])
-    cumsum   = np.cumsum(power,axis=1)
-    rolloff  = freqs[np.argmax(cumsum>=0.85*cumsum[:,-1:],axis=1)]
+    spread = np.sqrt(np.sum(power*(freqs[None,:]-centroid[:,None])**2,axis=1)/psum)
+    flux = np.concatenate([[0],np.sqrt(np.sum(np.diff(power,axis=0)**2,axis=1))])
+    cumsum = np.cumsum(power,axis=1)
+    rolloff = freqs[np.argmax(cumsum>=0.85*cumsum[:,-1:],axis=1)]
     flatness = np.exp(np.mean(np.log(power+1e-12),axis=1))/(np.mean(power,axis=1)+1e-12)
-    zcr      = np.mean(np.abs(np.diff(np.sign(frames),axis=1)),axis=1)/2
-    ste      = np.mean(frames**2,axis=1)
+    zcr = np.mean(np.abs(np.diff(np.sign(frames),axis=1)),axis=1)/2
+    ste = np.mean(frames**2,axis=1)
     return {
         'centroid_mean':float(np.mean(centroid)),'centroid_std':float(np.std(centroid)),
         'spread_mean':float(np.mean(spread)),'flux_mean':float(np.mean(flux)),
@@ -447,7 +381,6 @@ def compute_spectral_features(audio, sr=SR, n_fft=512):
         'zcr_std':float(np.std(zcr)),'ste_mean':float(np.mean(ste)),
         'ste_std':float(np.std(ste)),'ste_dynamic':float(np.max(ste)/(np.mean(ste)+1e-12)),
     }
-
 def compute_prosody(audio, sr=SR):
     voiced = vad_energy_zcr(audio, sr); total = len(voiced)
     speech_ratio = float(np.sum(voiced)/(total+1e-6))
@@ -473,15 +406,14 @@ def compute_prosody(audio, sr=SR):
         'voiced_run_std':float(np.std(runs)*fds) if runs else 0.0,
         'total_dur':total_dur,
     }
-
 @st.cache_data(show_spinner=False)
 def extract_all_features(audio_bytes: bytes, sr: int = SR) -> dict:
-    audio  = np.frombuffer(audio_bytes, dtype=np.float32).copy()
-    audio  = normalize_audio(audio)
-    mfcc   = compute_mfcc(audio, sr)
+    audio = np.frombuffer(audio_bytes, dtype=np.float32).copy()
+    audio = normalize_audio(audio)
+    mfcc = compute_mfcc(audio, sr)
     mfcc_d = delta_features(mfcc); mfcc_dd = delta_features(mfcc_d)
-    f0t    = compute_f0_track(audio, sr); vf0 = f0t[f0t>0]
-    js  = compute_jitter_shimmer(audio, sr)
+    f0t = compute_f0_track(audio, sr); vf0 = f0t[f0t>0]
+    js = compute_jitter_shimmer(audio, sr)
     lpc = compute_lpc_features(audio)
     spec= compute_spectral_features(audio, sr)
     pros= compute_prosody(audio, sr)
@@ -501,38 +433,36 @@ def extract_all_features(audio_bytes: bytes, sr: int = SR) -> dict:
         mfcc_feats[f'mfccDD{i+1}_mean']=float(np.mean(mfcc_dd[i]))
     return {**f0_stats,**js,**lpc,**spec,**pros,**mfcc_feats,'hnr':hnr,
             '_f0_track':f0t.tolist(),'_mfcc':mfcc[:5].tolist(),'_sr':sr}
-
 def sigmoid(x, center, scale):
     return float(1/(1+np.exp(-(x-center)/scale)))
-
 def compute_indicators(f: dict, role: str="Pilot") -> dict:
     f0_center = 140 if "Male" in role else 200 if "Female" in role else 165
     fat={}
-    fat['vocal_energy']    = (1-np.clip(f['ste_mean']*500,0,1))*20
+    fat['vocal_energy'] = (1-np.clip(f['ste_mean']*500,0,1))*20
     fat['hnr_breathiness'] = (1-sigmoid(f['hnr'],12,4))*18
-    fat['shimmer']         = np.clip(f['shimmer_db']/2.5,0,1)*16
-    fat['pitch_flatness']  = (1-np.clip(f['f0_range']/150,0,1))*15
-    fat['pause_length']    = np.clip(f['pause_mean_dur']/1.2,0,1)*15
-    fat['speech_rate']     = (1-np.clip(f['speech_ratio']/0.65,0,1))*8
-    fat['voiced_ratio']    = (1-np.clip(f['voiced_ratio']/0.55,0,1))*8
+    fat['shimmer'] = np.clip(f['shimmer_db']/2.5,0,1)*16
+    fat['pitch_flatness'] = (1-np.clip(f['f0_range']/150,0,1))*15
+    fat['pause_length'] = np.clip(f['pause_mean_dur']/1.2,0,1)*15
+    fat['speech_rate'] = (1-np.clip(f['speech_ratio']/0.65,0,1))*8
+    fat['voiced_ratio'] = (1-np.clip(f['voiced_ratio']/0.55,0,1))*8
     fatigue = float(np.clip(sum(fat.values()),0,100))
     stre={}
-    stre['f0_elevation']  = sigmoid(f['f0_mean'],f0_center+30,25)*22
+    stre['f0_elevation'] = sigmoid(f['f0_mean'],f0_center+30,25)*22
     stre['f0_variability']= np.clip(f['f0_std']/45,0,1)*15
-    stre['jitter']        = np.clip(f['jitter_local']/0.015,0,1)*16
+    stre['jitter'] = np.clip(f['jitter_local']/0.015,0,1)*16
     stre['spectral_flux'] = np.clip(f['flux_mean']*4000,0,1)*13
-    stre['energy_var']    = np.clip(f['ste_std']*600,0,1)*12
-    stre['centroid_hi']   = sigmoid(f['centroid_mean'],2200,500)*12
-    stre['lpc_flux']      = np.clip(f['lpc_flux']*60,0,1)*10
+    stre['energy_var'] = np.clip(f['ste_std']*600,0,1)*12
+    stre['centroid_hi'] = sigmoid(f['centroid_mean'],2200,500)*12
+    stre['lpc_flux'] = np.clip(f['lpc_flux']*60,0,1)*10
     stress = float(np.clip(sum(stre.values()),0,100))
     cog={}
     cog['hesitation_rate'] = np.clip(f['pause_rate']*2.5,0,1)*22
     cog['rhythm_irregular']= np.clip(f['voiced_run_std']/0.45,0,1)*18
     cog['short_voiced_runs']=(1-np.clip(f['voiced_run_mean']/0.7,0,1))*15
-    cog['lpc_error']       = np.clip(f['lpc_error_std']*1200,0,1)*14
-    cog['spectral_noise']  = np.clip(f['flatness_mean']*6,0,1)*14
-    cog['jitter_rap']      = np.clip(f['jitter_rap']/0.012,0,1)*10
-    cog['mfcc_delta']      = np.clip(abs(f.get('mfccD1_mean',0))/4,0,1)*7
+    cog['lpc_error'] = np.clip(f['lpc_error_std']*1200,0,1)*14
+    cog['spectral_noise'] = np.clip(f['flatness_mean']*6,0,1)*14
+    cog['jitter_rap'] = np.clip(f['jitter_rap']/0.012,0,1)*10
+    cog['mfcc_delta'] = np.clip(abs(f.get('mfccD1_mean',0))/4,0,1)*7
     cognitive = float(np.clip(sum(cog.values()),0,100))
     clarity_raw = (sigmoid(f['hnr'],10,5)*35 + (1-np.clip(f['jitter_local']/0.02,0,1))*25
                    + np.clip(f['speech_ratio']/0.6,0,1)*20 + (1-np.clip(f['flatness_mean']*5,0,1))*20)
@@ -555,29 +485,24 @@ def compute_indicators(f: dict, role: str="Pilot") -> dict:
         'voiced_ratio':f['voiced_ratio']*100,'centroid':f['centroid_mean'],
         'lpc_flux':f['lpc_flux'],'pause_mean':f['pause_mean_dur'],
     }
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  MODULE 1 — PLOTS
+# MODULE 1 — PLOTS
 # ══════════════════════════════════════════════════════════════════════════════
 PLOTLY_THEME = dict(
     paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(17,20,32,0.8)',
     font=dict(family='DM Mono, monospace', color='#4a5070', size=9),
     margin=dict(l=10,r=10,t=35,b=10),
 )
-
 def sev_color(score):
     if score<30: return '#2dcc8f'
     if score<50: return '#f0a030'
     if score<70: return '#e85020'
     return '#e84040'
-
 def severity_label(score):
     if score<30: return 'NOMINAL'
     if score<50: return 'MONITOR'
     if score<70: return 'CAUTION'
     return 'ALERT'
-
 def fig_radar(ind):
     cats=['Fatigue','Stress','Cog. Load','RT Clarity']
     vals=[ind['fatigue'],ind['stress'],ind['cognitive'],ind['rt_clarity']]
@@ -595,7 +520,6 @@ def fig_radar(ind):
         font=dict(family='DM Mono',color='#4a6080',size=9),
         height=260, showlegend=False, margin=dict(l=50,r=50,t=20,b=20))
     return fig
-
 def fig_f0_track(f0_track, sr=SR):
     f0 = np.array(f0_track); t = np.arange(len(f0))*HOP_N/sr; vm = f0>0
     fig = go.Figure()
@@ -610,7 +534,6 @@ def fig_f0_track(f0_track, sr=SR):
         title=dict(text='Fundamental Frequency Track',font=dict(size=10,color='#4d7cfe')),
         legend=dict(orientation='h',y=1.12,font=dict(size=8)))
     return fig
-
 def fig_mfcc_heatmap(mfcc):
     fig = go.Figure(go.Heatmap(z=np.array(mfcc),
         colorscale=[[0,'#0c0e14'],[0.35,'#111420'],[0.7,'#1a2a5a'],[1,'#4d7cfe']],
@@ -621,7 +544,6 @@ def fig_mfcc_heatmap(mfcc):
         yaxis=dict(title='MFCC',gridcolor='#1e2236',zerolinecolor='#1e2236'),
         title=dict(text='MFCC Coefficients 1–5',font=dict(size=10,color='#4d7cfe')))
     return fig
-
 def fig_sub_breakdown(subs, title, color):
     labels = [k.replace('_',' ').title() for k in subs]
     values = list(subs.values())
@@ -634,7 +556,6 @@ def fig_sub_breakdown(subs, title, color):
         yaxis=dict(gridcolor='#1e2236',tickfont=dict(size=7)),
         title=dict(text=title,font=dict(size=10,color=color)),margin=dict(l=10,r=40,t=35,b=10))
     return fig
-
 def fig_session_trend(history):
     if len(history)<2: return None
     df = pd.DataFrame(history); fig = go.Figure()
@@ -650,7 +571,6 @@ def fig_session_trend(history):
         title=dict(text='Session Trend',font=dict(size=10,color='#4d7cfe')),
         legend=dict(orientation='h',y=1.15,font=dict(size=8)))
     return fig
-
 def fig_risk_gauge(composite):
     color = sev_color(composite)
     fig = go.Figure(go.Indicator(
@@ -667,10 +587,8 @@ def fig_risk_gauge(composite):
     fig.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(0,0,0,0)',
         font=dict(family='DM Mono',color='#4a5070'),height=185,margin=dict(l=20,r=20,t=20,b=10))
     return fig
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  MODULE 1 — RENDER HELPERS
+# MODULE 1 — RENDER HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 def render_metric_card(label, value_str, sub, desc, bar_pct, score):
     accent = sev_color(score)
@@ -683,7 +601,6 @@ def render_metric_card(label, value_str, sub, desc, bar_pct, score):
         <div class="metric-bar-track"><div class="metric-bar-fill" style="width:{pct:.0f}%;background:{accent}"></div></div>
         <div style="font-family:var(--font-mono);font-size:0.6rem;color:var(--text-muted);margin-top:7px;line-height:1.5">{desc}</div>
     </div>""", unsafe_allow_html=True)
-
 def generate_aviation_report(ind, feats, role):
     f,s,c = ind['fatigue'],ind['stress'],ind['cognitive']
     rl = ind['risk_level']
@@ -726,17 +643,14 @@ def generate_aviation_report(ind, feats, role):
     NOT a certified airworthiness or fitness-for-duty determination. All flight safety decisions must follow
     FAR/EASA regulations, operator SOPs and qualified authority assessment per ICAO Doc 9966.
     </div>""", unsafe_allow_html=True)
-
 def load_audio_file(path, sr=SR):
     audio, fsr = sf.read(path, dtype='float32', always_2d=False)
     if audio.ndim > 1: audio = audio.mean(axis=1)
     if fsr != sr: audio = signal.resample(audio, int(len(audio)*sr/fsr))
     return audio
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  MODULE 2 — PILOT WHISPERER HELPERS
-#  FIX: ffmpeg calls wrapped with FFMPEG_AVAILABLE guard + timeout + returncode check
+# MODULE 2 — PILOT WHISPERER HELPERS
+# FIX: ffmpeg calls wrapped with FFMPEG_AVAILABLE guard + timeout + returncode check
 # ══════════════════════════════════════════════════════════════════════════════
 def _resolve_pls_url(url: str) -> str:
     """If URL is a .pls playlist, fetch it and extract the first File= entry."""
@@ -752,27 +666,22 @@ def _resolve_pls_url(url: str) -> str:
     except Exception:
         pass
     return url
-
 def capture_audio_stream(url: str, seconds: int) -> str:
     """
     Capture live ATC audio stream.
-
     Strategy (tries in order until one succeeds):
     1. Python requests streaming — works even when Streamlit Cloud blocks raw TCP
        to audio servers; downloads `seconds` worth of compressed bytes then
        converts with ffmpeg locally.
     2. Direct ffmpeg — for environments where ffmpeg can reach the URL.
-
     Returns path to a 16-kHz mono WAV temp file.
     """
     if not FFMPEG_AVAILABLE:
         raise RuntimeError(
             "ffmpeg is not installed. Add 'ffmpeg' to packages.txt and redeploy."
         )
-
     # Resolve .pls playlists to a direct stream URL
     stream_url = _resolve_pls_url(url)
-
     # ── Strategy 1: Python requests streaming → local ffmpeg transcode ────────
     # This bypasses the restriction where ffmpeg itself cannot open remote URLs.
     # Both requests and ffmpeg hit the same host, so if LiveATC is reachable at
@@ -782,7 +691,7 @@ def capture_audio_stream(url: str, seconds: int) -> str:
     requests_error = None
     try:
         hdrs = {"User-Agent": "Mozilla/5.0", "Icy-MetaData": "0"}
-        max_bytes = seconds * 24_000   # ~192 kbps upper bound
+        max_bytes = seconds * 24_000 # ~192 kbps upper bound
         chunks = []
         total = 0
         with requests.get(stream_url, headers=hdrs, stream=True, timeout=25) as resp:
@@ -794,18 +703,14 @@ def capture_audio_stream(url: str, seconds: int) -> str:
                     total += len(chunk)
                     if total >= max_bytes:
                         break
-
         if total < 2000:
             raise RuntimeError(f"Stream returned only {total} bytes.")
-
         ext = ".aac" if ("aac" in ct or "adts" in ct) else ".ogg" if "ogg" in ct else ".mp3"
         with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as f:
             f.write(b"".join(chunks))
             raw_tmp = f.name
-
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
             wav_path = f.name
-
         r2 = subprocess.run(
             ["ffmpeg", "-y", "-i", raw_tmp, "-t", str(seconds),
              "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", wav_path],
@@ -814,7 +719,6 @@ def capture_audio_stream(url: str, seconds: int) -> str:
         if r2.returncode == 0:
             return wav_path
         requests_error = f"transcode failed: {r2.stderr.decode('utf-8', errors='replace')[-200:]}"
-
     except RuntimeError:
         raise
     except Exception as e:
@@ -823,7 +727,6 @@ def capture_audio_stream(url: str, seconds: int) -> str:
         if raw_tmp:
             try: os.unlink(raw_tmp)
             except: pass
-
     # ── Strategy 2: direct ffmpeg (works on local / unrestricted servers) ─────
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
         path = f.name
@@ -839,7 +742,6 @@ def capture_audio_stream(url: str, seconds: int) -> str:
         )
         if result.returncode == 0:
             return path
-
         ffmpeg_stderr = result.stderr.decode("utf-8", errors="replace")
         # Detect geo-block / connection refused patterns
         is_geoblock = any(kw in ffmpeg_stderr for kw in [
@@ -867,13 +769,11 @@ def capture_audio_stream(url: str, seconds: int) -> str:
             f"Stream capture timed out after {seconds + 60}s.\n"
             "The stream may be offline, throttled, or geo-blocked."
         )
-
 def mistral_chat(prompt: str, max_tokens: int=1200, stream: bool=False):
     headers={"Authorization":f"Bearer {MISTRAL_API_KEY}","Content-Type":"application/json"}
     payload={"model":MISTRAL_MODEL,"messages":[{"role":"user","content":prompt}],"max_tokens":max_tokens,"stream":stream}
     r=requests.post(MISTRAL_API_URL,headers=headers,json=payload,stream=stream,timeout=60)
     r.raise_for_status(); return r
-
 def mistral_cleanup(text):
     prompt=f"""You are analyzing live ATC radio communication.
 Phraseology rules: ATC gives clearances/headings/altitudes. Pilot reads back.
@@ -892,7 +792,6 @@ Transcript:\n{text}"""
         return r.json()["choices"][0]["message"]["content"]
     except Exception as e:
         return f"[Mistral error: {e}]\n\n{text}"
-
 def mistral_discipline(cleaned_text):
     prompt=f"""You are an ATC radio discipline coach. Analyze this labeled ATC transcript.
 Respond with JSON only (no markdown):
@@ -905,16 +804,14 @@ Transcript:\n{cleaned_text}"""
             json={"model":MISTRAL_MODEL,"messages":[{"role":"user","content":prompt}],"max_tokens":600},timeout=30)
         r.raise_for_status()
         raw=r.json()["choices"][0]["message"]["content"].strip()
-        raw=re.sub(r"^```json|^```|```$","",raw,flags=re.MULTILINE).strip()
+        raw=re.sub(r"^```json:disable-run
         return json.loads(raw)
     except Exception as e:
         return {"score":0,"issues":[],"miscomm_flags":0,"confidence":"—","clearance":"—",
                 "coach_summary":f"Analysis error: {e}"}
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  MODULE 3 — WHISPER / STT HELPERS
-#  FIX: All ffmpeg calls guarded; graceful fallback when unavailable
+# MODULE 3 — WHISPER / STT HELPERS
+# FIX: All ffmpeg calls guarded; graceful fallback when unavailable
 # ══════════════════════════════════════════════════════════════════════════════
 def _ffmpeg_to_16k_mono(audio_path: str) -> str:
     """
@@ -923,7 +820,7 @@ def _ffmpeg_to_16k_mono(audio_path: str) -> str:
     Whisper can handle the raw browser WebM/WAV directly.
     """
     if not FFMPEG_AVAILABLE:
-        return audio_path  # Whisper handles many formats natively
+        return audio_path # Whisper handles many formats natively
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
         out_path = f.name
     try:
@@ -943,7 +840,6 @@ def _ffmpeg_to_16k_mono(audio_path: str) -> str:
         except: pass
         return audio_path
     return out_path
-
 def _segment_by_silence(whisper_result: dict, gap_threshold: float = 0.6) -> list:
     segments = whisper_result.get("segments", [])
     if not segments:
@@ -976,7 +872,6 @@ def _segment_by_silence(whisper_result: dict, gap_threshold: float = 0.6) -> lis
     if current.strip():
         turns.append(current.strip())
     return turns or [whisper_result.get("text", "").strip()]
-
 def transcribe_audio(audio_path: str) -> str:
     import whisper as whisper_lib
     # Attempt ffmpeg conversion; fall back gracefully
@@ -984,16 +879,14 @@ def transcribe_audio(audio_path: str) -> str:
         converted = _ffmpeg_to_16k_mono(audio_path)
     except Exception:
         converted = audio_path
-
     # Verify the converted file exists and is non-trivial
     try:
         if not os.path.exists(converted) or os.path.getsize(converted) < 500:
             converted = audio_path
     except Exception:
         converted = audio_path
-
     try:
-        model = whisper_lib.load_model("base")  # Use 'base' on cloud (faster/lighter)
+        model = whisper_lib.load_model("base") # Use 'base' on cloud (faster/lighter)
         result = model.transcribe(
             converted, fp16=False, language="en",
             condition_on_previous_text=False, word_timestamps=True,
@@ -1007,11 +900,9 @@ def transcribe_audio(audio_path: str) -> str:
                 os.unlink(converted)
         except Exception:
             pass
-
     turns = _segment_by_silence(result)
     st.session_state["_last_whisper_turns"] = turns
     return "\n".join(turns).strip() if len(turns) > 1 else result["text"].strip()
-
 def mistral_aviation_correct(raw_transcript: str) -> str:
     turns = st.session_state.get("_last_whisper_turns", None)
     if turns and len(turns) > 1:
@@ -1033,16 +924,14 @@ Return ONLY the corrected readback text — no labels, no explanations.
         return r.json()["choices"][0]["message"]["content"].strip()
     except Exception:
         return raw_transcript
-
 def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice Readback"):
     """
     Voice readback widget using streamlit-mic-recorder.
     Fully cloud-compatible: ffmpeg used when available, skipped otherwise.
     Whisper model is 'base' for speed on Streamlit Cloud.
     """
-    id_key     = f"{state_key}_last_id"
+    id_key = f"{state_key}_last_id"
     submit_key = f"{state_key}_submit_now"
-
     try:
         from streamlit_mic_recorder import mic_recorder
     except ImportError:
@@ -1051,7 +940,6 @@ def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice
         Add <code>streamlit-mic-recorder</code> to requirements.txt
         </div>""", unsafe_allow_html=True)
         return st.session_state.get(state_key, "")
-
     # Check whisper availability
     whisper_available = False
     try:
@@ -1059,12 +947,10 @@ def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice
         whisper_available = True
     except ImportError:
         pass
-
     st.markdown(f'<div class="whisper-panel">', unsafe_allow_html=True)
     st.markdown(f"""<div style="font-family:var(--font-mono);font-size:0.62rem;letter-spacing:0.18em;
     text-transform:uppercase;color:var(--accent-green);margin-bottom:6px">{label}</div>""",
     unsafe_allow_html=True)
-
     if not whisper_available:
         st.markdown("""<div class="cloud-warning">
         ⚠ openai-whisper not installed. Add <code>openai-whisper</code> to requirements.txt.<br>
@@ -1072,16 +958,13 @@ def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice
         </div>""", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
         return st.session_state.get(state_key, "")
-
     ffmpeg_note = "" if FFMPEG_AVAILABLE else " · ffmpeg unavailable, using direct decode"
-    st.caption(f"Start → speak → Stop  ·  Whisper STT + Mistral aviation correction{ffmpeg_note}")
-
+    st.caption(f"Start → speak → Stop · Whisper STT + Mistral aviation correction{ffmpeg_note}")
     audio = mic_recorder(
         start_prompt="● Start Recording",
         stop_prompt="■ Stop & Transcribe",
         key=widget_key
     )
-
     if audio:
         current_id = audio.get("id", 0)
         if current_id != st.session_state.get(id_key, -1):
@@ -1099,14 +982,12 @@ def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice
                     st.error(f"Transcription error: {e}")
                     st.markdown('</div>', unsafe_allow_html=True)
                     return st.session_state.get(state_key, "")
-
             with st.spinner("Applying aviation correction..."):
                 try:
                     corrected = mistral_aviation_correct(whisper_raw)
                 except Exception:
                     corrected = whisper_raw
                 st.session_state[state_key] = corrected
-
             st.markdown(f"""<div style="background:rgba(45,204,143,0.06);border:1px solid rgba(45,204,143,0.2);
             border-radius:4px;padding:10px 14px;margin:6px 0;font-family:var(--font-mono);font-size:0.8rem;color:#a0d8b8">
             ✓ <strong>Corrected:</strong> {corrected}</div>""", unsafe_allow_html=True)
@@ -1118,33 +999,26 @@ def whisper_readback_widget(state_key: str, widget_key: str, label: str = "Voice
                 st.markdown(f"""<div style="background:rgba(45,204,143,0.06);border:1px solid rgba(45,204,143,0.2);
                 border-radius:4px;padding:10px 14px;margin:6px 0;font-family:var(--font-mono);font-size:0.8rem;color:#a0d8b8">
                 ✓ <strong>Corrected:</strong> {stored}</div>""", unsafe_allow_html=True)
-
     stored_transcript = st.session_state.get(state_key, "")
     if stored_transcript:
         if st.button("Submit Voice Readback", use_container_width=True,
                      key=f"{widget_key}_voice_submit"):
             st.session_state[submit_key] = True
-
     st.markdown('</div>', unsafe_allow_html=True)
     return stored_transcript
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  MODULE 3 — RL ENGINE
+# MODULE 3 — RL ENGINE
 # ══════════════════════════════════════════════════════════════════════════════
 RL_ALPHA,RL_GAMMA,RL_EPSILON=0.3,0.7,0.2
-
 def rl_get_state():
     diff_idx=list(DIFFICULTY_LEVELS.keys()).index(st.session_state.difficulty)
     weak=st.session_state.rl_weak_areas
     top_weak=min(weak.items(),key=lambda x:x[1]["attempts"]/max(x[1]["errors"]+0.1,1))[0] if weak else "none"
     return (diff_idx,top_weak)
-
 def rl_choose_action(state):
     actions=["Normal Traffic","Heavy Traffic","Emergency"]; qt=st.session_state.rl_q_table
     if random.random()<RL_EPSILON or state not in qt: return random.choice(actions)
     return max(actions,key=lambda a:qt.get(state,{}).get(a,0.0))
-
 def rl_update(state,action,reward,next_state):
     actions=["Normal Traffic","Heavy Traffic","Emergency"]; qt=st.session_state.rl_q_table
     for s in [state,next_state]:
@@ -1152,7 +1026,6 @@ def rl_update(state,action,reward,next_state):
     old=qt[state].get(action,0.0)
     qt[state][action]=old+RL_ALPHA*(reward+RL_GAMMA*max(qt[next_state].values())-old)
     st.session_state.rl_q_table=qt
-
 def rl_update_weak_areas(scenario_type,items_missed,items_incorrect):
     weak=st.session_state.rl_weak_areas
     if scenario_type not in weak: weak[scenario_type]={"attempts":0,"errors":0}
@@ -1161,7 +1034,6 @@ def rl_update_weak_areas(scenario_type,items_missed,items_incorrect):
     ie=st.session_state.rl_item_errors
     for item in items_missed+items_incorrect: ie[item]=ie.get(item,0)+1
     st.session_state.rl_item_errors=ie
-
 def rl_generate_recommendations():
     recs=[]
     for stype,stats in st.session_state.rl_weak_areas.items():
@@ -1171,18 +1043,15 @@ def rl_generate_recommendations():
     se=sorted(st.session_state.rl_item_errors.items(),key=lambda x:x[1],reverse=True)[:3]
     for item,cnt in se: recs.append(f"Often missed: **{item}** ({cnt}×)")
     st.session_state.rl_recommendations=recs; return recs
-
 def weighted_scenario_type():
     types=list(SCENARIO_TYPES.keys())
     return random.choices(types,weights=[SCENARIO_TYPES[t]["weight"] for t in types])[0]
-
 def adaptive_difficulty():
     if not st.session_state.auto_adapt or st.session_state.total_attempts<3: return
     acc=st.session_state.correct_responses/max(st.session_state.total_attempts,1)
     levels=list(DIFFICULTY_LEVELS.keys()); idx=levels.index(st.session_state.difficulty)
     if acc>0.85 and idx<len(levels)-1: st.session_state.difficulty=levels[idx+1]
     elif acc<0.50 and idx>0: st.session_state.difficulty=levels[idx-1]
-
 AVIATE_RULES="""
 ━━━━ MANDATORY AVIATION RADIO PHRASEOLOGY ━━━━
 FREQUENCIES: "121.3" or "119.05"
@@ -1193,14 +1062,12 @@ SQUAWK: "squawk 7700"
 FLIGHT NUMBERS: "Air India 123"
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
-
 def aviate_numbers(text):
     def dw(d): return {"0":"zero","1":"one","2":"two","3":"tree","4":"four","5":"fife","6":"six","7":"seven","8":"eight","9":"niner"}.get(d,d)
     text=re.sub(r'\bFL\s*(\d{2,3})\b',lambda m:"flight level "+" ".join(dw(d) for d in m.group(1)),text,flags=re.IGNORECASE)
     text=re.sub(r'\b(\d{3})\.(\d{1,2})\b',lambda m:" ".join(dw(d) for d in m.group(1))+" decimal "+" ".join(dw(d) for d in m.group(2).rstrip("0") or m.group(2)),text)
     text=re.sub(r'\brunway\s+(\d{1,2})([LRC]?)\b',lambda m:"runway "+" ".join(dw(d) for d in m.group(1))+{"L":" left","R":" right","C":" centre"}.get(m.group(2).upper(),""),text,flags=re.IGNORECASE)
     return text
-
 def generate_scenario(airport,aircraft,scenario_type,difficulty,custom_situation=None):
     complexity=DIFFICULTY_LEVELS[difficulty]["complexity"]
     pilot_first=scenario_type=="Emergency" and not custom_situation
@@ -1222,7 +1089,6 @@ Return ONLY JSON:
                     delta=json.loads(ds).get("choices",[{}])[0].get("delta",{}).get("content","")
                     if delta: full+=delta; yield delta
                 except: pass
-
 def generate_pilot_init_scenario(airport,aircraft,scenario_type,difficulty,custom_situation=None):
     complexity=DIFFICULTY_LEVELS[difficulty]["complexity"]
     situation_context=f"\nSPECIFIC SITUATION: {custom_situation}\n" if custom_situation else ""
@@ -1251,7 +1117,6 @@ Return ONLY JSON:
                     delta=json.loads(ds).get("choices",[{}])[0].get("delta",{}).get("content","")
                     if delta: full+=delta; yield delta
                 except: pass
-
 def generate_atc_response_to_pilot(airport,aircraft,difficulty,pilot_call,conv_history=None,scenario_type="Normal Traffic"):
     complexity=DIFFICULTY_LEVELS[difficulty]["complexity"]
     history_text=""
@@ -1272,7 +1137,6 @@ Return ONLY JSON:
     except:
         return {"atc_transmission":"Roger, stand by.","key_readback_items":[],"correct_response":"Stand by.",
                 "coaching_notes":"","flight_phase":"unknown","session_complete":False}
-
 def evaluate_pilot_initial_call(scenario,pilot_call):
     model_call=scenario.get("model_pilot_call","")
     items=scenario.get("key_pilot_call_items",[])
@@ -1293,7 +1157,6 @@ Return ONLY JSON:
     except:
         return {"score":0,"pass_fail":"ERROR","overall_feedback":"Parse error.","grade":"N/A",
                 "items_correct":[],"items_missed":[],"items_incorrect":[],"specific_corrections":"","coaching_tip":""}
-
 def generate_next_exchange(airport,aircraft,difficulty,conv_history,scenario_type):
     complexity=DIFFICULTY_LEVELS[difficulty]["complexity"]
     history_text="\n".join(f"{'ATC' if ex['role']=='atc' else 'PILOT'}: {ex['text']}" for ex in conv_history[-6:])
@@ -1311,7 +1174,6 @@ Return ONLY JSON:
     except:
         return {"atc_transmission":"Stand by.","key_readback_items":[],"correct_response":"",
                 "coaching_notes":"","flight_phase":"unknown","session_complete":False}
-
 def evaluate_response(scenario_or_exchange,pilot_response,is_chain=False):
     atc=scenario_or_exchange.get("atc_transmission","")
     correct=scenario_or_exchange.get("correct_response","")
@@ -1334,7 +1196,6 @@ Return ONLY JSON:
     except:
         return {"score":0,"pass_fail":"ERROR","overall_feedback":"Parse error.","grade":"N/A",
                 "items_correct":[],"items_missed":[],"items_incorrect":[],"specific_corrections":"","coaching_tip":""}
-
 def build_tts_player(text, difficulty, emergency=False, label_prefix="ATC"):
     speed_map={"Student Pilot":0.82,"Private Pilot":0.92,"Commercial":1.05,"Expert / ATPL":1.2}
     rate=speed_map.get(difficulty,0.9); pitch=0.85 if emergency else 1.0
@@ -1374,10 +1235,8 @@ var s=document.getElementById(pid+'_status');if(s)s.textContent='STOPPED';}};
 window['atcReplay_'+pid]=function(){{window['atcStop_'+pid]();setTimeout(function(){{window['atcPlay_'+pid]();}},200);}};
 if(speechSynthesis.onvoiceschanged!==undefined)speechSynthesis.onvoiceschanged=function(){{speechSynthesis.getVoices();}};
 }})();</script>"""
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  MASTER HEADER
+# MASTER HEADER
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("""
 <div class="suite-header">
@@ -1386,7 +1245,7 @@ st.markdown("""
       <div style="font-family:var(--font-mono);font-size:0.6rem;letter-spacing:0.3em;text-transform:uppercase;
       color:var(--text-muted);margin-bottom:10px">Aviation Speech Intelligence Suite</div>
       <div class="suite-title">AviSuite</div>
-      <div class="suite-subtitle">Fatigue Analyzer  ·  Pilot Whisperer  ·  ScenarioSynth</div>
+      <div class="suite-subtitle">Fatigue Analyzer · Pilot Whisperer · ScenarioSynth</div>
       <div class="suite-badge">⚠ Research & Training Use Only · Not a Certified Safety Device</div>
     </div>
     <div style="text-align:right;padding-top:4px">
@@ -1400,13 +1259,11 @@ st.markdown("""
   </div>
 </div>
 """, unsafe_allow_html=True)
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  SIDEBAR
+# SIDEBAR
 # ══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
     st.markdown('<div style="padding:12px 0 6px;font-family:var(--font-display);font-size:0.65rem;letter-spacing:0.2em;text-transform:uppercase;color:var(--text-muted);border-bottom:1px solid var(--border)">Suite Configuration</div>', unsafe_allow_html=True)
-
     # Cloud capability banner
     cap_items = []
     if FFMPEG_AVAILABLE: cap_items.append("ffmpeg ✓")
@@ -1414,21 +1271,18 @@ with st.sidebar:
     if SOUNDDEVICE_AVAILABLE: cap_items.append("sounddevice ✓")
     else: cap_items.append("mic (browser ✓)")
     st.markdown(f'<div style="font-family:var(--font-mono);font-size:0.55rem;color:var(--text-muted);padding:4px 0;line-height:1.8">{" · ".join(cap_items)}</div>', unsafe_allow_html=True)
-
     st.markdown("### Common")
     m1_role = st.selectbox("Speaker Role", ["Pilot (Male)","Pilot (Female)","ATC Controller","Cabin Crew"], key="m1_role_sel")
-    m1_dur  = st.slider("Recording Duration (s)", 5, 60, 15, 5)
-
+    m1_dur = st.slider("Recording Duration (s)", 5, 60, 15, 5)
     st.markdown("### Module 3 — Training")
-    m3_airport  = st.selectbox("Airport", AIRPORTS, index=7)
+    m3_airport = st.selectbox("Airport", AIRPORTS, index=7)
     m3_aircraft = st.selectbox("Aircraft", AIRCRAFT_TYPES, index=1)
     diff_options= list(DIFFICULTY_LEVELS.keys())
-    sel_diff    = st.select_slider("Difficulty", options=diff_options, value=st.session_state.difficulty)
+    sel_diff = st.select_slider("Difficulty", options=diff_options, value=st.session_state.difficulty)
     st.session_state.difficulty = sel_diff
     badge = DIFFICULTY_LEVELS[sel_diff]["badge"]
     st.markdown(f'<span class="diff-tag {badge}">{sel_diff}</span>', unsafe_allow_html=True)
     st.session_state.auto_adapt = st.toggle("Auto-Adapt Difficulty", value=st.session_state.auto_adapt)
-
     st.markdown("---")
     st.markdown("### Session Statistics")
     acc_pct = (st.session_state.correct_responses/max(st.session_state.total_attempts,1))*100
@@ -1438,10 +1292,8 @@ with st.sidebar:
     with c2:
         st.markdown(f'<div class="score-display"><div class="score-num">{acc_pct:.0f}%</div><div class="score-lbl">Accuracy</div></div>',unsafe_allow_html=True)
     if st.session_state.total_attempts>0: st.progress(min(acc_pct/100,1.0))
-
     st.markdown("---")
     st.markdown(f'<div style="font-family:var(--font-mono);font-size:0.62rem;color:var(--accent-violet);letter-spacing:0.1em">RL Q-Learning · Episode {st.session_state.rl_episode}</div>', unsafe_allow_html=True)
-
     st.markdown("---")
     if st.button("Reset Session"):
         for k in ["session_score","total_attempts","correct_responses","history","current_scenario",
@@ -1457,13 +1309,10 @@ with st.sidebar:
                 elif isinstance(v,str): st.session_state[k]=""
                 else: st.session_state[k]=None
         st.rerun()
-
     st.markdown("---")
     st.markdown('<div style="font-size:0.6rem;color:var(--text-muted);line-height:1.9;font-family:var(--font-mono)">ICAO Doc 9966<br>FAA AC 120-100<br>NASA Ames Fatigue Research<br>EUROCONTROL HF Guidelines</div>',unsafe_allow_html=True)
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  MAIN TABS
+# MAIN TABS
 # ══════════════════════════════════════════════════════════════════════════════
 tab1, tab2, tab3, tab4 = st.tabs([
     "Fatigue Analyzer",
@@ -1471,17 +1320,14 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "Scenario Synth",
     "Performance",
 ])
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  TAB 1 — MODULE 1: FATIGUE ANALYZER
-#  FIX: sounddevice block replaced with upload-only on Streamlit Cloud
+# TAB 1 — MODULE 1: FATIGUE ANALYZER
+# FIX: sounddevice block replaced with upload-only on Streamlit Cloud
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
     col_main1, col_side1 = st.columns([3,1])
     with col_main1:
         st.markdown('<div class="section-label">Acoustic Fatigue · Stress · Cognitive Load · RT Clarity Analysis</div>', unsafe_allow_html=True)
-
     with col_side1:
         if st.session_state.m1_results:
             ind=st.session_state.m1_results; rl=ind['risk_level']; rc=RISK_COLORS[rl]
@@ -1491,8 +1337,8 @@ with tab1:
             <div style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:{rc};margin:4px 0">{rl}</div>
             <div style="font-family:var(--font-mono);font-size:0.58rem;color:{rc}88">{ind['composite']:.0f} / 100</div>
             </div>""", unsafe_allow_html=True)
-
-   # ── Recording & Upload Controls ─────────────────────────────────────────────
+    # ── Recording / Upload row ──────────────────────────────────────────────
+    # ── Recording & Upload Controls ─────────────────────────────────────────────
 if SOUNDDEVICE_AVAILABLE:
     col_rec, col_upl, col_conf = st.columns([2, 1, 1])
 
@@ -1581,26 +1427,6 @@ else:
         type=['wav','mp3','ogg','flac'],
         key="m1_cloud_upload"
     )
-        # Rerun AFTER columns are fully closed — avoids Streamlit Cloud session loss
-        if _needs_rerun:
-            st.rerun()
-    else:
-        # Cloud environment: upload-only with clear messaging
-        st.markdown("""<div class="cloud-warning">
-        🎙 <strong>Microphone recording</strong> requires a local installation of AviSuite (sounddevice library).
-        On Streamlit Cloud, please <strong>upload an audio file</strong> below for analysis.
-        WAV, MP3, OGG, and FLAC are supported. Minimum 5 seconds recommended.
-        </div>""", unsafe_allow_html=True)
-        col_up1, col_conf1 = st.columns([2,1])
-        with col_conf1:
-            if st.session_state.m1_results:
-                conf=st.session_state.m1_results['confidence']
-                cc=sev_color(100-abs(conf-100))
-                st.markdown(f"""<div class="score-display">
-                <div class="score-num" style="color:{cc};font-size:1.6rem">{conf:.0f}%</div>
-                <div class="score-lbl">Signal Confidence</div>
-                </div>""",unsafe_allow_html=True)
-
     # File upload processing (works in both modes)
     uploaded1 = st.file_uploader(
         "Upload Audio File for Fatigue Analysis",
@@ -1624,7 +1450,6 @@ else:
                 try: os.unlink(tmp_path)
                 except: pass
         st.rerun()
-
     if st.session_state.m1_results and st.session_state.m1_features:
         ind=st.session_state.m1_results; feat=st.session_state.m1_features
         st.markdown("---")
@@ -1638,16 +1463,13 @@ else:
         Pauses/s <span class="val">{ind['pause_rate']:.2f}</span>
         Centroid <span class="val">{ind['centroid']:.0f} Hz</span>
         </div>""",unsafe_allow_html=True)
-
         c1,c2,c3,c4=st.columns(4)
         with c1: render_metric_card("Fatigue",f"{ind['fatigue']:.0f}",severity_label(ind['fatigue']),"Energy · HNR · Shimmer · Pauses",ind['fatigue'],ind['fatigue'])
         with c2: render_metric_card("Stress",f"{ind['stress']:.0f}",severity_label(ind['stress']),"F0 Elevation · Jitter · Flux",ind['stress'],ind['stress'])
         with c3: render_metric_card("Cognitive Load",f"{ind['cognitive']:.0f}",severity_label(ind['cognitive']),"Hesitations · Rhythm · LPC",ind['cognitive'],ind['cognitive'])
         with c4: render_metric_card("RT Clarity",f"{ind['rt_clarity']:.0f}","Readback Quality","HNR · Jitter · Speech Rate",ind['rt_clarity'],100-ind['rt_clarity'])
-
         st.markdown("<br>",unsafe_allow_html=True)
         vtab1,vtab2,vtab3,vtab4=st.tabs(["Visualizations","Sub-Scores","Feature Table","Trend"])
-
         with vtab1:
             vg,vr,vf=st.columns([1,1,2])
             with vg:
@@ -1660,18 +1482,15 @@ else:
                 if f0t: st.plotly_chart(fig_f0_track(f0t,SR),use_container_width=True,config={'displayModeBar':False})
             mfcc_d=feat.get('_mfcc',[])
             if mfcc_d: st.plotly_chart(fig_mfcc_heatmap(mfcc_d),use_container_width=True,config={'displayModeBar':False})
-
         with vtab2:
             cs1,cs2,cs3=st.columns(3)
             with cs1: st.plotly_chart(fig_sub_breakdown(ind['fat_subs'],'Fatigue Contributors','#e84040'),use_container_width=True,config={'displayModeBar':False})
             with cs2: st.plotly_chart(fig_sub_breakdown(ind['stre_subs'],'Stress Contributors','#f0a030'),use_container_width=True,config={'displayModeBar':False})
             with cs3: st.plotly_chart(fig_sub_breakdown(ind['cog_subs'],'Cognitive Contributors','#8b5cf6'),use_container_width=True,config={'displayModeBar':False})
-
         with vtab3:
             disp={k:v for k,v in feat.items() if not k.startswith('_')}
             df_f=pd.DataFrame([{'Feature':k,'Value':f"{v:.5f}" if isinstance(v,float) else str(v)} for k,v in disp.items()])
             st.dataframe(df_f,use_container_width=True,height=400)
-
         with vtab4:
             if len(st.session_state.m1_history)>=2:
                 fig_t=fig_session_trend(st.session_state.m1_history)
@@ -1679,7 +1498,6 @@ else:
             if st.session_state.m1_history:
                 st.dataframe(pd.DataFrame(st.session_state.m1_history).round(1),use_container_width=True)
             else: st.caption("Record 2+ sessions to see trend.")
-
         st.markdown("---")
         st.markdown('<div class="section-label">Aviation Analysis Report</div>', unsafe_allow_html=True)
         generate_aviation_report(ind, feat, m1_role)
@@ -1690,16 +1508,13 @@ else:
         <div style="font-family:var(--font-display);font-size:1rem;color:var(--text-muted);letter-spacing:0.08em">Awaiting Transmission</div>
         <div style="font-family:var(--font-mono);font-size:0.65rem;margin-top:8px;color:var(--text-muted)">Upload an audio file above · Minimum 5 seconds recommended</div>
         </div>""",unsafe_allow_html=True)
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  TAB 2 — MODULE 2: PILOT WHISPERER
-#  FIX: ffmpeg guard → shows clear error instead of crashing; monitoring loop
-#       exits cleanly if ffmpeg missing
+# TAB 2 — MODULE 2: PILOT WHISPERER
+# FIX: ffmpeg guard → shows clear error instead of crashing; monitoring loop
+# exits cleanly if ffmpeg missing
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
     st.markdown('<div class="section-label">Live ATC Radio Discipline Coach · Whisper STT · Mistral NLP</div>', unsafe_allow_html=True)
-
     # Show ffmpeg status prominently
     if not FFMPEG_AVAILABLE:
         st.markdown("""<div class="cloud-warning">
@@ -1710,7 +1525,6 @@ with tab2:
         3. Redeploy your app on Streamlit Cloud<br><br>
         The Scenario Synth (Tab 3) and Fatigue Analyzer (Tab 1) work without ffmpeg.
         </div>""", unsafe_allow_html=True)
-
     m2_col1, m2_col2 = st.columns([3,1])
     with m2_col1:
         st.markdown("""<div class="data-panel">
@@ -1721,7 +1535,6 @@ with tab2:
         </div>""", unsafe_allow_html=True)
     with m2_col2:
         m2_seconds = st.slider("Capture Duration (s)", 10, 120, 30, key="m2_sec")
-
     m2_start = st.toggle(
         "Activate Live Monitoring",
         value=False,
@@ -1729,7 +1542,6 @@ with tab2:
         disabled=not FFMPEG_AVAILABLE,
         help="Requires ffmpeg. Add 'ffmpeg' to packages.txt and redeploy." if not FFMPEG_AVAILABLE else None
     )
-
     if not m2_start:
         st.markdown(f"""<div style="text-align:center;padding:50px;border:1px dashed var(--border);
         border-radius:6px;color:var(--text-muted)">
@@ -1746,48 +1558,38 @@ with tab2:
         except ImportError:
             model_whisper_loaded = False
             st.warning("Whisper not installed. Add `openai-whisper` to requirements.txt")
-
         if model_whisper_loaded and FFMPEG_AVAILABLE:
             @st.cache_resource
             def load_whisper_model():
                 import whisper as wlib
-                return wlib.load_model("base")  # 'base' is faster on cloud
-
-            m2_status_ph   = st.empty()
-            m2_audio_ph    = st.empty()
-            m2_metrics_ph  = st.empty()
-            m2_results_ph  = st.empty()
-            m2_cycle_ph    = st.empty()
-
+                return wlib.load_model("base") # 'base' is faster on cloud
+            m2_status_ph = st.empty()
+            m2_audio_ph = st.empty()
+            m2_metrics_ph = st.empty()
+            m2_results_ph = st.empty()
+            m2_cycle_ph = st.empty()
             cycle_count = 0
             while st.session_state.get("m2_start_toggle", False):
                 cycle_count += 1
                 ts = time.strftime("%H:%M:%S")
-
                 m2_status_ph.markdown(f"""<div class="live-badge">
                 <span class="live-dot"></span>Capturing cycle {cycle_count} · {m2_seconds}s
                 </div>""", unsafe_allow_html=True)
-
                 try:
                     audio_path = capture_audio_stream(LIVEATC_URL, m2_seconds)
-
                     with open(audio_path, "rb") as f2: audio_bytes = f2.read()
                     m2_audio_ph.audio(audio_bytes, format="audio/wav")
                     m2_cycle_ph.markdown(f'<div style="font-family:var(--font-mono);font-size:0.6rem;color:var(--text-muted)">Cycle {cycle_count} · {ts}</div>', unsafe_allow_html=True)
-
                     m2_status_ph.markdown("""<div class="live-badge" style="color:var(--accent-blue);
                     background:rgba(77,124,254,0.08);border-color:rgba(77,124,254,0.2)">
                     <span style="width:5px;height:5px;border-radius:50%;background:var(--accent-blue);display:inline-block"></span>
                     Transcribing with Whisper...</div>""", unsafe_allow_html=True)
-
                     wmodel = load_whisper_model()
                     result = wmodel.transcribe(audio_path, fp16=False, language="en",
                                               condition_on_previous_text=False)
                     raw_text = result["text"].strip()
-
                     try: os.remove(audio_path)
                     except: pass
-
                     if not raw_text:
                         m2_status_ph.markdown("""<div style="font-family:var(--font-mono);font-size:0.68rem;
                         color:var(--text-muted)">No speech detected in this capture window.</div>""", unsafe_allow_html=True)
@@ -1796,23 +1598,19 @@ with tab2:
                         background:rgba(139,92,246,0.08);border-color:rgba(139,92,246,0.2)">
                         <span style="width:5px;height:5px;border-radius:50%;background:var(--accent-violet);display:inline-block"></span>
                         Mistral analyzing...</div>""", unsafe_allow_html=True)
-
-                        cleaned  = mistral_cleanup(raw_text)
+                        cleaned = mistral_cleanup(raw_text)
                         analysis = mistral_discipline(cleaned)
                         has_miscomm = analysis.get("miscomm_flags", 0) > 0 or "POSSIBLE MISCOMM" in cleaned
-
                         m2_status_ph.markdown(f"""<div class="live-badge" style="color:var(--accent-green);
                         background:rgba(45,204,143,0.08);border-color:rgba(45,204,143,0.2)">
                         <span style="width:5px;height:5px;border-radius:50%;background:var(--accent-green);display:inline-block"></span>
                         Cycle {cycle_count} complete · {ts}</div>""", unsafe_allow_html=True)
-
                         score_v = analysis.get("score", 0)
                         n_issues = len(analysis.get("issues", []))
                         n_miscomm = analysis.get("miscomm_flags", 0)
                         clearance = analysis.get("clearance", "—")
                         score_color = "#2dcc8f" if score_v>=80 else "#f0a030" if score_v>=60 else "#e84040"
                         clear_color = "#2dcc8f" if clearance=="CLEAR" else "#e84040"
-
                         with m2_metrics_ph.container():
                             mc1,mc2,mc3,mc4,mc5 = st.columns(5)
                             def m2_card(label, val, color):
@@ -1824,7 +1622,6 @@ with tab2:
                             with mc3: m2_card("Miscomm", n_miscomm, "#e84040" if n_miscomm>0 else "#2dcc8f")
                             with mc4: m2_card("Clearance", clearance, clear_color)
                             with mc5: m2_card("Confidence", analysis.get("confidence","—"), "#4d7cfe")
-
                         with m2_results_ph.container():
                             left2, right2 = st.columns(2)
                             with left2:
@@ -1858,7 +1655,6 @@ with tab2:
                                         </div>""", unsafe_allow_html=True)
                                 st.markdown('<div class="section-label">Coach Summary</div>', unsafe_allow_html=True)
                                 st.markdown(f'<div class="data-panel" style="font-size:0.78rem;color:var(--text-secondary);line-height:1.7">{analysis.get("coach_summary","")}</div>', unsafe_allow_html=True)
-
                 except Exception as e:
                     err_msg = str(e)
                     m2_status_ph.error(f"Capture error (cycle {cycle_count}): {err_msg[:600]}")
@@ -1875,32 +1671,25 @@ with tab2:
                             Try: <code>https://www.liveatc.net/play/kjfk_app.pls</code> → right-click → copy direct stream URL
                             </div>""", unsafe_allow_html=True)
                     time.sleep(5)
-
                 time.sleep(1)
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  TAB 3 — MODULE 3: SCENARIO SYNTH
+# TAB 3 — MODULE 3: SCENARIO SYNTH
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
     m3_inner = st.tabs(["Training","Chain Session","Coaching","RL Engine"])
-
     # ── M3 Tab A — Single Training ──────────────────────────────────────────
     with m3_inner[0]:
         col_main3, col_info3 = st.columns([3,1])
         with col_main3:
-
             st.markdown('<div class="section-label">Interaction Mode</div>', unsafe_allow_html=True)
             interaction_mode = st.radio(
                 "interaction_mode_radio",
-                ["ATC Speaks First  (Standard Readback)", "Pilot Initiates  (You call ATC, ATC responds — continuous loop)"],
+                ["ATC Speaks First (Standard Readback)", "Pilot Initiates (You call ATC, ATC responds — continuous loop)"],
                 key="m3_interaction_mode", label_visibility="collapsed",
                 horizontal=True
             )
             pilot_initiates = "Pilot Initiates" in interaction_mode
-
             st.markdown("---")
-
             sc1c, sc2c = st.columns([2,1])
             with sc1c:
                 if pilot_initiates:
@@ -1943,7 +1732,6 @@ with tab3:
                 sit_preset = st.selectbox("Scenario Preset", list(m3_presets.keys()), key="m3_sit_preset")
             with sc2c:
                 stype_override = st.selectbox("Scenario Type", ["RL-Guided","Random","Normal Traffic","Heavy Traffic","Emergency"], key="m3_stype_override")
-
             custom_sit3 = None
             pv3 = m3_presets.get(sit_preset)
             if pv3 == "CUSTOM":
@@ -1952,7 +1740,6 @@ with tab3:
             elif pv3:
                 custom_sit3 = pv3
                 st.markdown(f'<div style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-muted);padding:5px 8px;background:var(--bg-elevated);border-radius:3px;margin:4px 0">{pv3}</div>', unsafe_allow_html=True)
-
             gc3, _ = st.columns([2,3])
             with gc3:
                 gen_label = "Generate Scenario" if not pilot_initiates else "Set Up Situation"
@@ -1992,14 +1779,12 @@ with tab3:
                         except Exception as e3:
                             st.error(f"Parse error: {e3}"); st.session_state.current_scenario = None
                     st.rerun()
-
             # ── MODE A: ATC SPEAKS FIRST ──────────────────────────────────
             if not pilot_initiates:
                 if st.session_state.current_scenario:
                     sc3 = st.session_state.current_scenario; s_type3 = sc3.get("scenario_type","Normal Traffic")
                     urgent_kws3 = ["tcas","windshear","go around","mayday","pan-pan","expedite","immediately"]
                     is_urg3 = s_type3 == "Emergency" or any(k in sc3.get("atc_transmission","").lower() for k in urgent_kws3)
-
                     st.markdown("---")
                     st.markdown(f"""<div style="display:flex;align-items:center;gap:10px;margin:8px 0 4px">
                     <span style="font-family:var(--font-mono);font-size:0.65rem;letter-spacing:0.12em;text-transform:uppercase;
@@ -2007,30 +1792,22 @@ with tab3:
                     <span style="font-family:var(--font-mono);font-size:0.6rem;color:var(--text-muted)">{sc3.get('scenario_id','')}</span>
                     {'<span style="font-family:var(--font-mono);font-size:0.6rem;background:rgba(232,64,64,0.1);color:var(--accent-red);border:1px solid rgba(232,64,64,0.2);border-radius:2px;padding:2px 8px">URGENT</span>' if is_urg3 else ''}
                     </div>""", unsafe_allow_html=True)
-
                     st.markdown('<div class="section-label">Situation Briefing</div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="atc-box">{sc3.get("situation_briefing","")}</div>', unsafe_allow_html=True)
-
                     st.markdown('<div class="section-label">ATC Transmission</div>', unsafe_allow_html=True)
                     atc_tts3 = build_tts_player(sc3.get("atc_transmission",""), st.session_state.difficulty, emergency=is_urg3)
                     st.components.v1.html(atc_tts3, height=155)
-
                     show_t3 = st.checkbox("Show transcript", key="m3_show_t")
                     if show_t3:
                         box_cls3 = "emergency-box" if is_urg3 else "atc-box"
                         st.markdown(f'<div class="{box_cls3}">{sc3.get("atc_transmission","")}</div>', unsafe_allow_html=True)
-
                     if sc3.get("key_readback_items"):
                         st.markdown(f'<div style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-muted);margin:4px 0">Read back: {" · ".join(sc3["key_readback_items"])}</div>', unsafe_allow_html=True)
-
                     st.markdown('<div class="section-label">Your Readback</div>', unsafe_allow_html=True)
-                    whisper_readback_widget(state_key="whisper_t1", widget_key="mic_t1", label="Voice Readback  ·  Whisper + Mistral Aviation Correction")
-
+                    whisper_readback_widget(state_key="whisper_t1", widget_key="mic_t1", label="Voice Readback · Whisper + Mistral Aviation Correction")
                     pilot_input3 = st.text_area("Or type / edit readback:", value=st.session_state.get("whisper_t1",""),
                         placeholder="Speak above — transcript auto-fills. Or type manually.", height=70, key="m3_pilot_resp")
-
                     voice_submitted3 = st.session_state.get("whisper_t1_submit_now", False)
-
                     def do_eval_m3(text3):
                         with st.spinner("Evaluating..."):
                             fb3 = evaluate_response(sc3, text3)
@@ -2046,11 +1823,9 @@ with tab3:
                                 "grade":fb3.get("grade","N/A"),"pass_fail":fb3.get("pass_fail",""),
                                 "scenario_id":sc3.get("scenario_id",""),"items_missed":fb3.get("items_missed",[])})
                             st.session_state.whisper_t1 = ""; st.session_state.whisper_t1_submit_now = False
-
                     if voice_submitted3:
                         vt3 = st.session_state.get("whisper_t1","").strip()
                         if vt3: do_eval_m3(vt3); st.rerun()
-
                     ec3, rc3 = st.columns([2,1])
                     with ec3:
                         if st.button("Submit & Evaluate", use_container_width=True, key="m3_submit"):
@@ -2063,7 +1838,6 @@ with tab3:
                                 "specific_corrections":sc3.get("correct_response",""),"coaching_tip":sc3.get("coaching_notes",""),
                                 "grade":"Review","items_correct":[],"items_missed":[]}
                             st.rerun()
-
                     if st.session_state.feedback:
                         fb3 = st.session_state.feedback; pf3 = fb3.get("pass_fail","")
                         st.markdown("---")
@@ -2075,7 +1849,7 @@ with tab3:
                             with s2: st.markdown(f'<div class="score-display"><div class="score-num" style="color:{color3};font-size:1.4rem">{"PASS" if pf3=="PASS" else "FAIL"}</div><div class="score-lbl">Result</div></div>', unsafe_allow_html=True)
                             with s3: st.markdown(f'<div class="score-display"><div class="score-num" style="font-size:1rem;color:{color3}">{fb3.get("grade","")}</div><div class="score-lbl">Grade</div></div>', unsafe_allow_html=True)
                             if fb3.get("items_correct"): st.markdown(f'<div style="color:var(--accent-green);font-size:0.78rem;margin:4px 0">✓ {" · ".join(fb3["items_correct"])}</div>', unsafe_allow_html=True)
-                            if fb3.get("items_missed"):  st.markdown(f'<div style="color:var(--accent-amber);font-size:0.78rem;margin:4px 0">⚠ Missed: {" · ".join(fb3["items_missed"])}</div>', unsafe_allow_html=True)
+                            if fb3.get("items_missed"): st.markdown(f'<div style="color:var(--accent-amber);font-size:0.78rem;margin:4px 0">⚠ Missed: {" · ".join(fb3["items_missed"])}</div>', unsafe_allow_html=True)
                             if fb3.get("items_incorrect"): st.markdown(f'<div style="color:var(--accent-red);font-size:0.78rem;margin:4px 0">✗ Wrong: {" · ".join(fb3["items_incorrect"])}</div>', unsafe_allow_html=True)
                             recs3 = st.session_state.rl_recommendations
                             if recs3: st.markdown(f'<div class="rl-box"><strong style="color:var(--accent-violet)">RL Recommendation</strong><br><br>{"<br>".join(recs3[:2])}</div>', unsafe_allow_html=True)
@@ -2089,12 +1863,10 @@ with tab3:
                     <div style="font-family:var(--font-display);font-size:0.9rem;color:var(--text-muted);letter-spacing:0.08em">Awaiting Scenario</div>
                     <div style="font-family:var(--font-mono);font-size:0.62rem;margin-top:6px;color:var(--text-muted)">Select preset → Generate Scenario</div>
                     </div>""", unsafe_allow_html=True)
-
             # ── MODE B: PILOT INITIATES ───────────────────────────────────
             else:
                 pi_sc = st.session_state.get("pi_scenario")
                 pi_step = st.session_state.get("pi_step","init")
-
                 if not pi_sc:
                     st.markdown("""<div style="text-align:center;padding:50px 20px;border:1px dashed var(--border);
                     border-radius:6px;margin-top:16px">
@@ -2105,7 +1877,6 @@ with tab3:
                 else:
                     pi_s_type = pi_sc.get("scenario_type","Normal Traffic")
                     pi_is_urg = pi_s_type == "Emergency" or "mayday" in pi_sc.get("situation_briefing","").lower() or "pan-pan" in pi_sc.get("situation_briefing","").lower()
-
                     st.markdown("---")
                     st.markdown(f"""<div style="display:flex;align-items:center;gap:10px;margin:8px 0 4px">
                     <span style="font-family:var(--font-mono);font-size:0.65rem;letter-spacing:0.12em;text-transform:uppercase;
@@ -2113,16 +1884,12 @@ with tab3:
                     <span style="font-family:var(--font-mono);font-size:0.6rem;background:rgba(0,200,232,0.08);color:var(--accent-cyan);border:1px solid rgba(0,200,232,0.2);border-radius:2px;padding:2px 8px">PILOT INITIATES</span>
                     <span style="font-family:var(--font-mono);font-size:0.6rem;color:var(--text-muted)">{pi_sc.get('scenario_id','')}</span>
                     </div>""", unsafe_allow_html=True)
-
                     st.markdown('<div class="section-label">Situation Briefing</div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="pilot-box">{pi_sc.get("situation_briefing","")}</div>', unsafe_allow_html=True)
-
                     st.markdown('<div class="section-label">Your Task</div>', unsafe_allow_html=True)
                     st.markdown(f'<div style="font-family:var(--font-mono);font-size:0.72rem;color:var(--accent-cyan);padding:8px 12px;background:rgba(0,200,232,0.05);border-left:3px solid var(--accent-cyan);border-radius:0 3px 3px 0;margin:4px 0">{pi_sc.get("pilot_initial_context","")}</div>', unsafe_allow_html=True)
-
                     if pi_sc.get("key_pilot_call_items"):
                         st.markdown(f'<div style="font-family:var(--font-mono);font-size:0.62rem;color:var(--text-muted);margin:3px 0">Include: {" · ".join(pi_sc["key_pilot_call_items"])}</div>', unsafe_allow_html=True)
-
                     conv_hist = st.session_state.get("pi_conv_history",[])
                     if conv_hist:
                         st.markdown('<div class="section-label">Conversation Log</div>', unsafe_allow_html=True)
@@ -2133,20 +1900,15 @@ with tab3:
                                 st.markdown(f'<div class="pilot-box" style="margin:3px 0"><span style="font-family:var(--font-mono);font-size:0.6rem;color:var(--accent-green);letter-spacing:0.1em">YOU</span>{badge}<br><span style="font-size:0.82rem">{ex["text"]}</span></div>', unsafe_allow_html=True)
                             else:
                                 st.markdown(f'<div class="atc-box" style="margin:3px 0"><span style="font-family:var(--font-mono);font-size:0.6rem;color:var(--accent-blue);letter-spacing:0.1em">ATC</span><br><span style="font-size:0.82rem">{ex["text"]}</span></div>', unsafe_allow_html=True)
-
                     if pi_step == "pilot_call":
                         st.markdown("---")
                         st.markdown('<div class="section-label" style="color:var(--accent-cyan)">▶ Your Initial Call to ATC</div>', unsafe_allow_html=True)
-
-                        whisper_readback_widget(state_key="whisper_pi", widget_key="mic_pi", label="Speak Your Call  ·  Whisper + Mistral Aviation Correction")
-
+                        whisper_readback_widget(state_key="whisper_pi", widget_key="mic_pi", label="Speak Your Call · Whisper + Mistral Aviation Correction")
                         pi_call_input = st.text_area("Or type your transmission:",
                             value=st.session_state.get("whisper_pi",""),
                             placeholder="e.g. 'Mumbai Approach, Indigo 6E201, passing 8000ft, request ILS 27'",
                             height=70, key="m3_pi_call_input")
-
                         pi_voice_sub = st.session_state.get("whisper_pi_submit_now", False)
-
                         def do_pi_initial_call(call_text):
                             with st.spinner("Evaluating your call..."):
                                 eval_res = evaluate_pilot_initial_call(pi_sc, call_text)
@@ -2164,11 +1926,9 @@ with tab3:
                             st.session_state.pi_step = "pilot_readback"
                             st.session_state.whisper_pi = ""; st.session_state.whisper_pi_submit_now = False
                             st.session_state.whisper_pi_rb = ""; st.session_state.pi_readback_eval = None
-
                         if pi_voice_sub:
                             vt_pi = st.session_state.get("whisper_pi","").strip()
                             if vt_pi: do_pi_initial_call(vt_pi); st.rerun()
-
                         pc1, pc2 = st.columns([2,1])
                         with pc1:
                             if st.button("Transmit to ATC", use_container_width=True, key="m3_pi_call_submit"):
@@ -2178,7 +1938,6 @@ with tab3:
                         with pc2:
                             if st.button("Show Model Call", use_container_width=True, key="m3_pi_call_hint"):
                                 st.markdown(f'<div class="feedback-box" style="margin-top:6px"><strong style="color:var(--accent-cyan)">Model Call</strong><br><br><em style="color:#7fe89a">{pi_sc.get("model_pilot_call","")}</em><br><br><span style="color:var(--text-muted);font-size:0.72rem">💡 {pi_sc.get("coaching_notes","")}</span></div>', unsafe_allow_html=True)
-
                     elif pi_step == "pilot_readback":
                         if st.session_state.pi_pilot_call_eval:
                             ev = st.session_state.pi_pilot_call_eval; pf_c = "#2dcc8f" if ev.get("pass_fail")=="PASS" else "#e84040"
@@ -2189,33 +1948,25 @@ with tab3:
                             with sc_col3: st.markdown(f'<div class="score-display"><div class="score-num" style="font-size:1rem;color:{pf_c}">{ev.get("grade","")}</div><div class="score-lbl">Grade</div></div>', unsafe_allow_html=True)
                             if ev.get("items_missed"): st.markdown(f'<div style="color:var(--accent-amber);font-size:0.78rem;margin:3px 0">⚠ Missed: {" · ".join(ev["items_missed"])}</div>', unsafe_allow_html=True)
                             st.markdown(f'<div class="feedback-box" style="margin:6px 0"><strong>Call Feedback</strong><br><br>{ev.get("overall_feedback","")}<br><br><em style="color:#7fe89a">{ev.get("specific_corrections","")}</em></div>', unsafe_allow_html=True)
-
                         atc_resp = st.session_state.pi_atc_response or {}
                         atc_tx = atc_resp.get("atc_transmission","")
                         pi_is_urg_resp = "expedite" in atc_tx.lower() or "immediately" in atc_tx.lower() or "go around" in atc_tx.lower()
-
                         st.markdown("---")
                         st.markdown('<div class="section-label">ATC Response</div>', unsafe_allow_html=True)
                         atc_tts_pi = build_tts_player(atc_tx, st.session_state.difficulty, emergency=pi_is_urg_resp)
                         st.components.v1.html(atc_tts_pi, height=155)
-
                         show_atc_pi = st.checkbox("Show ATC transcript", key="m3_pi_show_atc")
                         if show_atc_pi:
                             st.markdown(f'<div class="atc-box">{atc_tx}</div>', unsafe_allow_html=True)
-
                         if atc_resp.get("key_readback_items"):
                             st.markdown(f'<div style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-muted);margin:4px 0">Read back: {" · ".join(atc_resp["key_readback_items"])}</div>', unsafe_allow_html=True)
-
                         st.markdown('<div class="section-label" style="color:var(--accent-green)">▶ Your Readback to ATC</div>', unsafe_allow_html=True)
-                        whisper_readback_widget(state_key="whisper_pi_rb", widget_key="mic_pi_rb", label="Voice Readback  ·  Whisper + Mistral Aviation Correction")
-
+                        whisper_readback_widget(state_key="whisper_pi_rb", widget_key="mic_pi_rb", label="Voice Readback · Whisper + Mistral Aviation Correction")
                         pi_rb_input = st.text_area("Or type your readback:",
                             value=st.session_state.get("whisper_pi_rb",""),
                             placeholder="Read back the ATC clearance/instructions...",
                             height=70, key="m3_pi_rb_input")
-
                         pi_rb_voice_sub = st.session_state.get("whisper_pi_rb_submit_now", False)
-
                         def do_pi_readback(rb_text):
                             with st.spinner("Evaluating readback..."):
                                 rb_eval = evaluate_response(atc_resp, rb_text)
@@ -2231,11 +1982,9 @@ with tab3:
                                     "grade":rb_eval.get("grade","N/A"),"pass_fail":rb_eval.get("pass_fail",""),"scenario_id":pi_sc.get("scenario_id",""),"items_missed":rb_eval.get("items_missed",[])})
                             st.session_state.pi_step = "continue"
                             st.session_state.whisper_pi_rb = ""; st.session_state.whisper_pi_rb_submit_now = False
-
                         if pi_rb_voice_sub:
                             vt_rb = st.session_state.get("whisper_pi_rb","").strip()
                             if vt_rb: do_pi_readback(vt_rb); st.rerun()
-
                         rb1, rb2 = st.columns([2,1])
                         with rb1:
                             if st.button("Submit Readback", use_container_width=True, key="m3_pi_rb_submit"):
@@ -2245,7 +1994,6 @@ with tab3:
                         with rb2:
                             if st.button("Show Answer", use_container_width=True, key="m3_pi_rb_hint"):
                                 st.markdown(f'<div class="feedback-box" style="margin-top:6px"><strong style="color:var(--accent-green)">Model Readback</strong><br><br><em style="color:#7fe89a">{atc_resp.get("correct_response","")}</em></div>', unsafe_allow_html=True)
-
                     elif pi_step == "continue":
                         rb_ev = st.session_state.pi_readback_eval or {}
                         if rb_ev:
@@ -2264,12 +2012,11 @@ with tab3:
                             st.markdown(f'<div style="color:var(--text-muted);font-size:0.78rem;margin-top:4px">💡 {rb_ev.get("coaching_tip","")}</div>', unsafe_allow_html=True)
                             recs_pi = st.session_state.rl_recommendations
                             if recs_pi: st.markdown(f'<div class="rl-box"><strong style="color:var(--accent-violet)">RL Recommendation</strong><br><br>{"<br>".join(recs_pi[:2])}</div>', unsafe_allow_html=True)
-
                         st.markdown("---")
                         st.markdown('<div class="section-label">Continue Conversation?</div>', unsafe_allow_html=True)
                         cont1, cont2 = st.columns(2)
                         with cont1:
-                            if st.button("📡  Continue — I Call ATC Again", use_container_width=True, key="m3_pi_continue"):
+                            if st.button("📡 Continue — I Call ATC Again", use_container_width=True, key="m3_pi_continue"):
                                 with st.spinner("Generating next situation..."):
                                     next_ex = generate_next_exchange(m3_airport, m3_aircraft, st.session_state.difficulty,
                                         [{"role":ex["role"],"text":ex["text"]} for ex in st.session_state.pi_conv_history[-6:]], pi_s_type)
@@ -2281,13 +2028,12 @@ with tab3:
                                 st.session_state.pi_step = "pilot_readback"
                                 st.rerun()
                         with cont2:
-                            if st.button("🔁  New Scenario from Scratch", use_container_width=True, key="m3_pi_new"):
+                            if st.button("🔁 New Scenario from Scratch", use_container_width=True, key="m3_pi_new"):
                                 st.session_state.pi_scenario = None; st.session_state.pi_step = "init"
                                 st.session_state.pi_conv_history = []; st.session_state.pi_pilot_call_eval = None
                                 st.session_state.pi_atc_response = None; st.session_state.pi_readback_eval = None
                                 st.session_state.whisper_pi = ""; st.session_state.whisper_pi_rb = ""
                                 st.rerun()
-
         with col_info3:
             ac3 = m3_airport.split(" - ")[0]
             st.markdown(f'<div class="score-display" style="margin-bottom:8px"><div class="score-num" style="font-size:1.2rem">{ac3}</div><div class="score-lbl">Airport</div></div>', unsafe_allow_html=True)
@@ -2304,12 +2050,10 @@ with tab3:
                 st.markdown("<br>", unsafe_allow_html=True)
                 pi_exchanges = len([e for e in st.session_state.pi_conv_history if e["role"]=="pilot"])
                 st.markdown(f'<div class="score-display"><div class="score-num" style="font-size:1.2rem">{pi_exchanges}</div><div class="score-lbl">Transmissions</div></div>', unsafe_allow_html=True)
-
     # ── M3 Tab B — Chain Session ─────────────────────────────────────────────
     with m3_inner[1]:
         st.markdown('<div class="section-label">Full Flight Conversation Chain</div>', unsafe_allow_html=True)
         st.markdown('<div class="rl-box">Practice a complete flight from taxi to parking. RL engine evaluates each exchange and generates the next ATC instruction automatically.</div>', unsafe_allow_html=True)
-
         if not st.session_state.conv_active:
             chain_c1,chain_c2=st.columns(2)
             with chain_c1:
@@ -2342,14 +2086,12 @@ with tab3:
             for ex in reversed(chain):
                 if ex.get("phase") and ex["phase"] not in ("initial",): current_phase=ex["phase"]; break
             phase_idx=phases.index(current_phase) if current_phase in phases else 0
-
             st.markdown(f"""<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
             <span style="font-family:var(--font-mono);font-size:0.62rem;color:var(--text-muted)">Phase:</span>
             <span style="font-family:var(--font-mono);font-size:0.65rem;color:var(--accent-cyan);text-transform:uppercase">{current_phase}</span>
             <span style="font-family:var(--font-mono);font-size:0.6rem;color:var(--text-muted)">Exchange {step}</span>
             </div>""", unsafe_allow_html=True)
             st.progress(min(phase_idx/8,1.0))
-
             st.markdown('<div class="section-label">Conversation Log</div>', unsafe_allow_html=True)
             for ex in chain:
                 role=ex.get("role","atc"); scored=ex.get("scored",False)
@@ -2360,11 +2102,9 @@ with tab3:
                 elif role=="pilot":
                     pf_c="var(--accent-green)" if ex.get("pass_fail")=="PASS" else "var(--accent-amber)" if ex.get("pass_fail")=="FAIL" else "var(--text-secondary)"
                     st.markdown(f'<div class="chain-entry" style="border-left:2px solid var(--accent-green)"><span style="color:var(--accent-green);font-size:0.62rem;letter-spacing:0.1em;text-transform:uppercase">Pilot</span>{score_badge}<br><span style="color:{pf_c}">{ex["text"]}</span></div>',unsafe_allow_html=True)
-
             pending_atc=None
             for ex in reversed(chain):
                 if ex["role"]=="atc" and not ex.get("scored",False): pending_atc=ex; break
-
             if pending_atc:
                 st.markdown(f'<div class="section-label">Exchange {step} — Read Back</div>', unsafe_allow_html=True)
                 urg_ch=any(k in pending_atc["text"].lower() for k in ["tcas","windshear","go around","mayday","expedite"])
@@ -2372,18 +2112,14 @@ with tab3:
                 st.components.v1.html(tts_ch,height=155)
                 if pending_atc.get("key_items"):
                     st.markdown(f'<div style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-muted);margin:4px 0">Read back: {" · ".join(pending_atc["key_items"])}</div>',unsafe_allow_html=True)
-
                 whisper_readback_widget(
                     state_key="whisper_chain",
                     widget_key=f"mic_chain_{step}_{render_id}",
-                    label="Voice Readback  ·  Whisper + Mistral Aviation Correction"
+                    label="Voice Readback · Whisper + Mistral Aviation Correction"
                 )
-
                 chain_input=st.text_area("Or type readback:",value=st.session_state.get("whisper_chain",""),
                     height=70,key=f"chain_inp_{step}_{render_id}",placeholder="Speak above or type here...")
-
                 voice_chain_submitted=st.session_state.get("whisper_chain_submit_now",False)
-
                 def do_chain_rb(submit_text):
                     with st.spinner("Evaluating + generating next ATC call..."):
                         fb=evaluate_response(pending_atc,submit_text,is_chain=True); score_ch=fb.get("score",0)
@@ -2404,11 +2140,9 @@ with tab3:
                         st.session_state.conv_step+=1; st.session_state.conv_render_id=render_id+1
                         st.session_state.conv_pending_eval=True; rl_generate_recommendations()
                         st.session_state.whisper_chain=""; st.session_state.whisper_chain_submit_now=False
-
                 if voice_chain_submitted:
                     vt=st.session_state.get("whisper_chain","").strip()
                     if vt: do_chain_rb(vt); st.rerun()
-
                 cc1,cc2,cc3=st.columns(3)
                 with cc1:
                     if st.button("Submit & Next",use_container_width=True,key=f"ch_sub_{step}_{render_id}"):
@@ -2430,7 +2164,6 @@ with tab3:
                         st.session_state.conv_step+=1; st.session_state.conv_render_id=render_id+1
                         st.session_state.whisper_chain=""
                         st.rerun()
-
                 if st.session_state.conv_pending_eval:
                     last_pilot=next((ex for ex in reversed(st.session_state.conv_chain) if ex["role"]=="pilot" and ex.get("feedback")),None)
                     if last_pilot:
@@ -2449,7 +2182,6 @@ with tab3:
                 if st.button("Start New Chain",use_container_width=True,key="chain_new"):
                     st.session_state.conv_active=False; st.session_state.conv_chain=[]
                     st.session_state.conv_step=0; st.rerun()
-
     # ── M3 Tab C — Coaching ──────────────────────────────────────────────────
     with m3_inner[2]:
         st.markdown('<div class="section-label">ATC Phraseology Reference</div>', unsafe_allow_html=True)
@@ -2481,7 +2213,6 @@ Squawk: seven seven zero zero<br><br>
             st.markdown("""<div class="guide-card"><strong>NATO Phonetic Alphabet</strong>
 Alpha Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliet Kilo Lima Mike November Oscar Papa Quebec Romeo Sierra Tango Uniform Victor Whiskey X-Ray Yankee Zulu
 </div>""", unsafe_allow_html=True)
-
         st.markdown('<div class="section-label">Ask the ATC Coach</div>', unsafe_allow_html=True)
         cq3=st.text_input("Question:",placeholder="e.g. What is the correct readback for a TCAS RA climb?",key="m3_coach_q")
         if st.button("Get Answer",key="m3_coach_btn") and cq3:
@@ -2489,7 +2220,6 @@ Alpha Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliet Kilo Lima Mike No
                 r=mistral_chat(f"Expert ATC instructor, concise ICAO-standard answer: {cq3}",max_tokens=400)
                 ans=r.json()["choices"][0]["message"]["content"]
             st.markdown(f'<div class="feedback-box">{ans}</div>',unsafe_allow_html=True)
-
     # ── M3 Tab D — RL Engine ─────────────────────────────────────────────────
     with m3_inner[3]:
         st.markdown('<div class="section-label">Reinforcement Learning — Q-Learning Adaptive Curriculum</div>', unsafe_allow_html=True)
@@ -2512,10 +2242,8 @@ Alpha Bravo Charlie Delta Echo Foxtrot Golf Hotel India Juliet Kilo Lima Mike No
         if recs_rl:
             for r_rl in recs_rl: st.markdown(f'<div class="rl-box" style="padding:8px 14px;margin:3px 0">{r_rl}</div>',unsafe_allow_html=True)
         else: st.info("Complete more scenarios to generate recommendations.")
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  TAB 4 — PERFORMANCE
+# TAB 4 — PERFORMANCE
 # ══════════════════════════════════════════════════════════════════════════════
 with tab4:
     st.markdown('<div class="section-label">Session Performance Dashboard</div>', unsafe_allow_html=True)
@@ -2524,13 +2252,11 @@ with tab4:
     with p_c2: st.metric("Accuracy",f"{acc_pct:.1f}%")
     with p_c3: st.metric("Attempts",st.session_state.total_attempts)
     with p_c4: st.metric("Streak",st.session_state.streaks)
-
     if st.session_state.history:
         st.markdown('<div class="section-label">Score History</div>', unsafe_allow_html=True)
         scores_h=[h["score"] for h in st.session_state.history]
         df_h=pd.DataFrame({"Attempt":list(range(1,len(scores_h)+1)),"Score":scores_h}).set_index("Attempt")
         st.line_chart(df_h,use_container_width=True)
-
         st.markdown('<div class="section-label">By Scenario Type</div>', unsafe_allow_html=True)
         ts_h={}
         for h in st.session_state.history:
@@ -2543,7 +2269,6 @@ with tab4:
             icon_h=SCENARIO_TYPES.get(t_h,{}).get("icon","📻")
             st.markdown(f"**{icon_h} {t_h}** — {s_h['count']} attempts · {pct_h:.0f}% pass rate · avg {avg_h:.0f} pts")
             st.progress(pct_h/100)
-
         st.markdown('<div class="section-label">Session Log</div>', unsafe_allow_html=True)
         for i,item_h in enumerate(reversed(st.session_state.history)):
             pf_c_h="var(--accent-green)" if item_h.get("pass_fail")=="PASS" else "var(--accent-red)"
@@ -2565,16 +2290,13 @@ with tab4:
         <div style="font-family:var(--font-display);font-size:0.9rem;color:var(--text-muted)">No Data Yet</div>
         <div style="font-family:var(--font-mono);font-size:0.62rem;margin-top:6px;color:var(--text-muted)">Complete scenarios to see performance analytics</div>
         </div>""",unsafe_allow_html=True)
-
     if st.session_state.m1_history:
         st.markdown('<div class="section-label">Fatigue Analysis Trend (Module 1)</div>', unsafe_allow_html=True)
         fig_m1t=fig_session_trend(st.session_state.m1_history)
         if fig_m1t:
             st.plotly_chart(fig_m1t,use_container_width=True,config={'displayModeBar':False},key="m1_trend_chart")
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-#  FOOTER
+# FOOTER
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("""
 <div style="margin-top:48px;padding:12px 0;border-top:1px solid var(--border);
