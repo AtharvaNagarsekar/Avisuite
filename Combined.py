@@ -1810,7 +1810,7 @@ with tab1:
             </div>""", unsafe_allow_html=True)
 
     col_rec1, col_up1, col_conf1 = st.columns([2,1,1])
-  with col_rec1:
+    with col_rec1:
         st.markdown("""<div style="font-family:var(--font-mono);font-size:0.62rem;
         letter-spacing:0.18em;text-transform:uppercase;color:var(--accent-blue);
         margin-bottom:4px">🎙 Record Transmission</div>""", unsafe_allow_html=True)
