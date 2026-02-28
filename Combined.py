@@ -804,7 +804,7 @@ Transcript:\n{cleaned_text}"""
             json={"model":MISTRAL_MODEL,"messages":[{"role":"user","content":prompt}],"max_tokens":600},timeout=30)
         r.raise_for_status()
         raw=r.json()["choices"][0]["message"]["content"].strip()
-        raw=re.sub(r"^```json:disable-run
+        raw=re.sub(r"^```json|^```|```$","",raw,flags=re.MULTILINE).strip()      
         return json.loads(raw)
     except Exception as e:
         return {"score":0,"issues":[],"miscomm_flags":0,"confidence":"—","clearance":"—",
