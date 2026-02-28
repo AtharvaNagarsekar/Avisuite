@@ -1492,68 +1492,95 @@ with tab1:
             <div style="font-family:var(--font-mono);font-size:0.58rem;color:{rc}88">{ind['composite']:.0f} / 100</div>
             </div>""", unsafe_allow_html=True)
 
-    # ── Recording / Upload row ──────────────────────────────────────────────
-    if SOUNDDEVICE_AVAILABLE:
-        # Local environment: show record button
-        # ── Recording state machine (all heavy work happens OUTSIDE columns) ──
-        # We use a "needs_rerun" flag so st.rerun() fires after the column
-        # context is fully closed, preventing Streamlit Cloud session-state loss.
-        _needs_rerun = False
+   # ── Recording & Upload Controls ─────────────────────────────────────────────
+if SOUNDDEVICE_AVAILABLE:
+    col_rec, col_upl, col_conf = st.columns([2, 1, 1])
 
-        col_rec1, col_up1, col_conf1 = st.columns([2,1,1])
-        with col_rec1:
-            if not st.session_state.m1_recording:
-                if st.button("● Record Transmission", use_container_width=True):
-                    st.session_state.m1_recording = True
-                    _needs_rerun = True
-            else:
-                st.markdown('<div class="rec-active"><span class="rec-dot"></span>Recording — Speak Naturally</div>',unsafe_allow_html=True)
-                prog = st.progress(0)
-                rec_error = None
-                rec_audio = None
+    with col_rec:
+        if not st.session_state.m1_recording:
+            if st.button("● Record Transmission", use_container_width=True, key="m1_record_btn"):
+                st.session_state.m1_recording = True
+                st.rerun()  # Force UI refresh before blocking call
+
+    # ── Blocking recording ─ OUTSIDE any column context ─────────────────────
+    if st.session_state.m1_recording:
+        st.markdown(
+            '<div class="rec-active"><span class="rec-dot"></span>RECORDING — speak now…</div>',
+            unsafe_allow_html=True
+        )
+        progress = st.progress(0)
+
+        audio = None
+        error = None
+
+        try:
+            import sounddevice as sd
+
+            n_frames = int(m1_dur * SR)
+            rec = sd.rec(n_frames, samplerate=SR, channels=1, dtype='float32')
+
+            for i in range(m1_dur * 10):
+                time.sleep(0.1)
+                progress.progress((i + 1) / (m1_dur * 10))
+
+            sd.wait()
+            audio = rec.flatten()
+
+        except Exception as e:
+            error = str(e)
+
+        st.session_state.m1_recording = False
+
+        if error:
+            st.error(f"Recording failed: {error}")
+        elif audio is not None and len(audio) > 200:
+            with st.spinner("Extracting acoustic features…"):
                 try:
-                    import sounddevice as sd
-                    # Start recording FIRST, then show progress during capture
-                    rec = sd.rec(int(m1_dur * SR), samplerate=SR, channels=1, dtype='float32')
-                    for i in range(m1_dur * 10):
-                        time.sleep(0.1)
-                        prog.progress((i + 1) / (m1_dur * 10))
-                    sd.wait()
-                    rec_audio = rec.flatten()
+                    audio_bytes = audio.astype(np.float32).tobytes()
+                    feats = extract_all_features(audio_bytes, SR)
+                    ind = compute_indicators(feats, m1_role)
+
+                    st.session_state.m1_results = ind
+                    st.session_state.m1_features = feats
+                    st.session_state.m1_history.append({
+                        'time': time.strftime("%H:%M:%S"),
+                        'role': m1_role,
+                        **{k: ind[k] for k in [
+                            'fatigue','stress','cognitive','rt_clarity',
+                            'composite','risk_level','confidence'
+                        ]}
+                    })
                 except Exception as e:
-                    rec_error = str(e)
+                    st.error(f"Analysis failed: {e}")
 
-                # Save to session state while still in context
-                st.session_state.m1_recording = False
-                if rec_error:
-                    st.error(f"Recording error: {rec_error}")
-                elif rec_audio is not None and len(rec_audio) > 100:
-                    with st.spinner("Analyzing..."):
-                        try:
-                            ab = rec_audio.astype(np.float32).tobytes()
-                            feats = extract_all_features(ab, SR)
-                            ind = compute_indicators(feats, m1_role)
-                            st.session_state.m1_results = ind
-                            st.session_state.m1_features = feats
-                            st.session_state.m1_history.append({
-                                'time': time.strftime("%H:%M:%S"), 'role': m1_role,
-                                **{k: ind[k] for k in ['fatigue','stress','cognitive','rt_clarity','composite','risk_level','confidence']}
-                            })
-                        except Exception as e:
-                            st.error(f"Analysis error: {e}")
-                _needs_rerun = True
+        st.rerun()
 
-        with col_up1:
-            uploaded1=st.file_uploader("Upload Audio",type=['wav','mp3','ogg','flac'],label_visibility='collapsed',key="m1_upload")
-        with col_conf1:
-            if st.session_state.m1_results:
-                conf=st.session_state.m1_results['confidence']
-                cc=sev_color(100-abs(conf-100))
-                st.markdown(f"""<div class="score-display">
-                <div class="score-num" style="color:{cc};font-size:1.6rem">{conf:.0f}%</div>
-                <div class="score-lbl">Signal Confidence</div>
-                </div>""",unsafe_allow_html=True)
+    with col_upl:
+        st.file_uploader(
+            "Or upload WAV/MP3/OGG/FLAC",
+            type=['wav','mp3','ogg','flac'],
+            key="m1_upload_fatigue",
+            help="5–60 seconds recommended"
+        )
 
+    with col_conf:
+        if st.session_state.m1_results:
+            conf = st.session_state.m1_results['confidence']
+            color = sev_color(100 - abs(conf - 100))
+            st.markdown(f"""
+            <div class="score-display">
+                <div class="score-num" style="color:{color}">{conf:.0f}%</div>
+                <div class="score-lbl">Confidence</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+else:
+    st.info("Live microphone recording requires local run + sounddevice.\nPlease upload an audio file instead.")
+    st.file_uploader(
+        "Upload audio for fatigue analysis",
+        type=['wav','mp3','ogg','flac'],
+        key="m1_cloud_upload"
+    )
         # Rerun AFTER columns are fully closed — avoids Streamlit Cloud session loss
         if _needs_rerun:
             st.rerun()
