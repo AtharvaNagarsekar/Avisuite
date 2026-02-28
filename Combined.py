@@ -738,56 +738,135 @@ def load_audio_file(path, sr=SR):
 #  MODULE 2 — PILOT WHISPERER HELPERS
 #  FIX: ffmpeg calls wrapped with FFMPEG_AVAILABLE guard + timeout + returncode check
 # ══════════════════════════════════════════════════════════════════════════════
-def capture_audio_stream(url, seconds):
+def _resolve_pls_url(url: str) -> str:
+    """If URL is a .pls playlist, fetch it and extract the first File= entry."""
+    if not url.lower().endswith(".pls"):
+        return url
+    try:
+        r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        for line in r.text.splitlines():
+            if line.lower().startswith("file"):
+                parts = line.split("=", 1)
+                if len(parts) == 2:
+                    return parts[1].strip()
+    except Exception:
+        pass
+    return url
+
+def capture_audio_stream(url: str, seconds: int) -> str:
     """
-    Capture live ATC stream via ffmpeg.
-    Supports HLS (.m3u8), direct MP3/AAC streams, and icecast feeds.
-    Raises RuntimeError with the actual ffmpeg stderr on failure.
+    Capture live ATC audio stream.
+
+    Strategy (tries in order until one succeeds):
+    1. Python requests streaming — works even when Streamlit Cloud blocks raw TCP
+       to audio servers; downloads `seconds` worth of compressed bytes then
+       converts with ffmpeg locally.
+    2. Direct ffmpeg — for environments where ffmpeg can reach the URL.
+
+    Returns path to a 16-kHz mono WAV temp file.
     """
     if not FFMPEG_AVAILABLE:
         raise RuntimeError(
-            "ffmpeg is not installed on this server.\n"
-            "Add 'ffmpeg' to your packages.txt file and redeploy."
+            "ffmpeg is not installed. Add 'ffmpeg' to packages.txt and redeploy."
         )
+
+    # Resolve .pls playlists to a direct stream URL
+    stream_url = _resolve_pls_url(url)
+
+    # ── Strategy 1: Python requests streaming → local ffmpeg transcode ────────
+    # This bypasses the restriction where ffmpeg itself cannot open remote URLs.
+    # Both requests and ffmpeg hit the same host, so if LiveATC is reachable at
+    # all this works; if Streamlit Cloud blocks the host entirely, both fail and
+    # we surface a clear geo-block message instead of a cryptic ffmpeg error.
+    raw_tmp = None
+    requests_error = None
+    try:
+        hdrs = {"User-Agent": "Mozilla/5.0", "Icy-MetaData": "0"}
+        max_bytes = seconds * 24_000   # ~192 kbps upper bound
+        chunks = []
+        total = 0
+        with requests.get(stream_url, headers=hdrs, stream=True, timeout=25) as resp:
+            resp.raise_for_status()
+            ct = resp.headers.get("Content-Type", "")
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    chunks.append(chunk)
+                    total += len(chunk)
+                    if total >= max_bytes:
+                        break
+
+        if total < 2000:
+            raise RuntimeError(f"Stream returned only {total} bytes.")
+
+        ext = ".aac" if ("aac" in ct or "adts" in ct) else ".ogg" if "ogg" in ct else ".mp3"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as f:
+            f.write(b"".join(chunks))
+            raw_tmp = f.name
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+            wav_path = f.name
+
+        r2 = subprocess.run(
+            ["ffmpeg", "-y", "-i", raw_tmp, "-t", str(seconds),
+             "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", wav_path],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=60,
+        )
+        if r2.returncode == 0:
+            return wav_path
+        requests_error = f"transcode failed: {r2.stderr.decode('utf-8', errors='replace')[-200:]}"
+
+    except RuntimeError:
+        raise
+    except Exception as e:
+        requests_error = str(e)
+    finally:
+        if raw_tmp:
+            try: os.unlink(raw_tmp)
+            except: pass
+
+    # ── Strategy 2: direct ffmpeg (works on local / unrestricted servers) ─────
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
         path = f.name
     try:
         result = subprocess.run(
-            [
-                "ffmpeg", "-y",
-                # HLS / network stream flags — required for LiveATC .m3u8 feeds
-                "-protocol_whitelist", "file,http,https,tcp,tls,crypto,hls,applehttp",
-                "-allowed_extensions", "ALL",
-                # reconnect on drop (common with live streams)
-                "-reconnect", "1",
-                "-reconnect_streamed", "1",
-                "-reconnect_delay_max", "5",
-                "-i", url,
-                "-t", str(seconds),
-                "-vn",
-                "-acodec", "pcm_s16le",
-                "-ar", "16000",
-                "-ac", "1",
-                path,
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,          # capture stderr so we can show it
-            timeout=seconds + 60,
+            ["ffmpeg", "-y",
+             "-protocol_whitelist", "file,http,https,tcp,tls,crypto,hls,applehttp",
+             "-allowed_extensions", "ALL",
+             "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+             "-i", stream_url, "-t", str(seconds),
+             "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", path],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=seconds + 60,
         )
-        if result.returncode != 0:
-            stderr_text = result.stderr.decode("utf-8", errors="replace")[-800:]
+        if result.returncode == 0:
+            return path
+
+        ffmpeg_stderr = result.stderr.decode("utf-8", errors="replace")
+        # Detect geo-block / connection refused patterns
+        is_geoblock = any(kw in ffmpeg_stderr for kw in [
+            "Connection timed out", "Connection refused",
+            "Network is unreachable", "No route to host", "403", "Forbidden",
+        ])
+        if is_geoblock:
             raise RuntimeError(
-                f"ffmpeg exited with code {result.returncode}.\n\n"
-                f"ffmpeg output:\n{stderr_text}\n\n"
-                f"Check your LIVEATC_URL in Streamlit secrets. "
-                f"The URL must be a direct audio stream (MP3/AAC/HLS .m3u8)."
+                "⛔ Streamlit Cloud cannot reach the LiveATC server — the connection timed out.\n\n"
+                "**This is a network restriction on Streamlit Cloud's servers**, not a bug in the app.\n\n"
+                "**Solutions:**\n"
+                "1. **Use a relay URL** — run a small proxy (e.g. on Railway or Fly.io) that re-streams "
+                "the LiveATC feed, then point LIVEATC_URL at your relay.\n"
+                "2. **Run locally** — LiveATC works fine when AviSuite runs on your own machine.\n"
+                "3. **Upload a recording** — record ATC audio yourself and use the Upload feature.\n\n"
+                f"Stream URL tried: `{stream_url}`"
             )
+        raise RuntimeError(
+            f"ffmpeg failed (code {result.returncode}).\n"
+            f"requests error: {requests_error}\n"
+            f"ffmpeg stderr: {ffmpeg_stderr[-400:]}"
+        )
     except subprocess.TimeoutExpired:
         raise RuntimeError(
-            f"ffmpeg timed out after {seconds + 60}s. "
-            "Check your LIVEATC_URL — the stream may be offline or geo-blocked."
+            f"Stream capture timed out after {seconds + 60}s.\n"
+            "The stream may be offline, throttled, or geo-blocked."
         )
-    return path
 
 def mistral_chat(prompt: str, max_tokens: int=1200, stream: bool=False):
     headers={"Authorization":f"Bearer {MISTRAL_API_KEY}","Content-Type":"application/json"}
@@ -914,7 +993,7 @@ def transcribe_audio(audio_path: str) -> str:
         converted = audio_path
 
     try:
-        model = whisper_lib.load_model("large")  # Use 'base' on cloud (faster/lighter)
+        model = whisper_lib.load_model("base")  # Use 'base' on cloud (faster/lighter)
         result = model.transcribe(
             converted, fp16=False, language="en",
             condition_on_previous_text=False, word_timestamps=True,
@@ -1416,32 +1495,54 @@ with tab1:
     # ── Recording / Upload row ──────────────────────────────────────────────
     if SOUNDDEVICE_AVAILABLE:
         # Local environment: show record button
+        # ── Recording state machine (all heavy work happens OUTSIDE columns) ──
+        # We use a "needs_rerun" flag so st.rerun() fires after the column
+        # context is fully closed, preventing Streamlit Cloud session-state loss.
+        _needs_rerun = False
+
         col_rec1, col_up1, col_conf1 = st.columns([2,1,1])
         with col_rec1:
             if not st.session_state.m1_recording:
                 if st.button("● Record Transmission", use_container_width=True):
-                    st.session_state.m1_recording = True; st.rerun()
+                    st.session_state.m1_recording = True
+                    _needs_rerun = True
             else:
                 st.markdown('<div class="rec-active"><span class="rec-dot"></span>Recording — Speak Naturally</div>',unsafe_allow_html=True)
-                prog=st.progress(0)
+                prog = st.progress(0)
+                rec_error = None
+                rec_audio = None
                 try:
                     import sounddevice as sd
-                    # ── Start recording FIRST, then show progress while it captures ──
+                    # Start recording FIRST, then show progress during capture
                     rec = sd.rec(int(m1_dur * SR), samplerate=SR, channels=1, dtype='float32')
                     for i in range(m1_dur * 10):
                         time.sleep(0.1)
                         prog.progress((i + 1) / (m1_dur * 10))
-                    sd.wait()  # block until recording finishes
-                    with st.spinner("Analyzing..."):
-                        audio=rec.flatten(); ab=audio.astype(np.float32).tobytes()
-                        feats=extract_all_features(ab,SR); ind=compute_indicators(feats,m1_role)
-                        st.session_state.m1_results=ind; st.session_state.m1_features=feats
-                        st.session_state.m1_history.append({
-                            'time':time.strftime("%H:%M:%S"),'role':m1_role,
-                            **{k:ind[k] for k in ['fatigue','stress','cognitive','rt_clarity','composite','risk_level','confidence']}})
+                    sd.wait()
+                    rec_audio = rec.flatten()
                 except Exception as e:
-                    st.error(f"Recording error: {e}")
-                st.session_state.m1_recording=False; st.rerun()
+                    rec_error = str(e)
+
+                # Save to session state while still in context
+                st.session_state.m1_recording = False
+                if rec_error:
+                    st.error(f"Recording error: {rec_error}")
+                elif rec_audio is not None and len(rec_audio) > 100:
+                    with st.spinner("Analyzing..."):
+                        try:
+                            ab = rec_audio.astype(np.float32).tobytes()
+                            feats = extract_all_features(ab, SR)
+                            ind = compute_indicators(feats, m1_role)
+                            st.session_state.m1_results = ind
+                            st.session_state.m1_features = feats
+                            st.session_state.m1_history.append({
+                                'time': time.strftime("%H:%M:%S"), 'role': m1_role,
+                                **{k: ind[k] for k in ['fatigue','stress','cognitive','rt_clarity','composite','risk_level','confidence']}
+                            })
+                        except Exception as e:
+                            st.error(f"Analysis error: {e}")
+                _needs_rerun = True
+
         with col_up1:
             uploaded1=st.file_uploader("Upload Audio",type=['wav','mp3','ogg','flac'],label_visibility='collapsed',key="m1_upload")
         with col_conf1:
@@ -1452,6 +1553,10 @@ with tab1:
                 <div class="score-num" style="color:{cc};font-size:1.6rem">{conf:.0f}%</div>
                 <div class="score-lbl">Signal Confidence</div>
                 </div>""",unsafe_allow_html=True)
+
+        # Rerun AFTER columns are fully closed — avoids Streamlit Cloud session loss
+        if _needs_rerun:
+            st.rerun()
     else:
         # Cloud environment: upload-only with clear messaging
         st.markdown("""<div class="cloud-warning">
@@ -1619,7 +1724,7 @@ with tab2:
             @st.cache_resource
             def load_whisper_model():
                 import whisper as wlib
-                return wlib.load_model("large")  # 'base' is faster on cloud
+                return wlib.load_model("base")  # 'base' is faster on cloud
 
             m2_status_ph   = st.empty()
             m2_audio_ph    = st.empty()
@@ -1874,7 +1979,7 @@ with tab3:
                     color:{'var(--accent-red)' if is_urg3 else 'var(--text-muted)'}">{s_type3}</span>
                     <span style="font-family:var(--font-mono);font-size:0.6rem;color:var(--text-muted)">{sc3.get('scenario_id','')}</span>
                     {'<span style="font-family:var(--font-mono);font-size:0.6rem;background:rgba(232,64,64,0.1);color:var(--accent-red);border:1px solid rgba(232,64,64,0.2);border-radius:2px;padding:2px 8px">URGENT</span>' if is_urg3 else ''}
-                    """, unsafe_allow_html=True)
+                    </div>""", unsafe_allow_html=True)
 
                     st.markdown('<div class="section-label">Situation Briefing</div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="atc-box">{sc3.get("situation_briefing","")}</div>', unsafe_allow_html=True)
